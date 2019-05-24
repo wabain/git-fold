@@ -14,6 +14,9 @@ DIFF_NEW = re.compile(rb'^\+\+\+ ((?P<devnull>/dev/null)|b/(?P<fname>.*))')
 HUNK_REGEX = re.compile(rb'^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@')
 DIFF_BINARY = re.compile(rb'^Binary files .* and .* differ$')
 
+DIFF_TREE_FILE = re.compile(rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) (?=[^R])([A-Z])\t(.*)')
+DIFF_TREE_FILE_RENAME = re.compile(rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) R(\d+)\t(.*)\t(.*)')
+
 
 class DiffParseState (Enum):
     Invalid = -1
@@ -23,6 +26,10 @@ class DiffParseState (Enum):
 
 
 DIFF_PARSE_INVALID = (DiffParseState.Invalid, None)
+
+
+def parse_diff_hunks(diff):
+    return DiffParser.parse_diff_hunks(diff)
 
 
 class DiffParser:
@@ -173,6 +180,75 @@ class DiffParser:
                    ops=[])
 
         return DiffParseState.InHunk, attrs
+
+
+def parse_diff_tree_summary(diff_tree_lines):
+    lines = diff_tree_lines.split(b'\n')
+    summary_lines = []
+
+    for idx, line in enumerate(lines):
+        if not line:
+            continue
+
+        m = DIFF_TREE_FILE.match(line)
+        if m:
+            old_mode, new_mode, old_oid, new_oid, delta_type, new_path = m.groups()
+            old_mode, new_mode, old_oid, new_oid, delta_type = \
+                (v.decode() for v in [old_mode, new_mode, old_oid, new_oid, delta_type])
+
+            old_path = None if all(n == '0' for n in old_oid) else new_path
+            if all(n == '0' for n in new_oid):
+                new_path = None
+
+            similarity = None
+        else:
+            m = DIFF_TREE_FILE_RENAME.match(line)
+            if not m:
+                raise Fatal(
+                    f'unable to parse diff-tree output line {idx + 1}:',
+                    extended=build_context_lines(lines, idx),
+                )
+            old_mode, new_mode, old_oid, new_oid, similarity, old_path, new_path = m.groups()
+            old_mode, new_mode, old_oid, new_oid = \
+                (v.decode() for v in [old_mode, new_mode, old_oid, new_oid])
+            similarity = int(similarity)
+            delta_type = 'R'
+
+        summary_lines.append(
+            FileDiffSummary(
+                old_mode=old_mode,
+                new_mode=new_mode,
+                old_oid=old_oid,
+                new_oid=new_oid,
+                delta_type=delta_type,
+                similarity=similarity,
+                old_path=old_path,
+                new_path=new_path,
+            )
+        )
+
+    return summary_lines
+
+
+class FileDiffSummary:
+    def __init__(self,
+                 old_mode,
+                 new_mode,
+                 old_oid,
+                 new_oid,
+                 delta_type,
+                 similarity,
+                 old_path,
+                 new_path):
+
+        self.old_mode = old_mode
+        self.new_mode = new_mode
+        self.old_oid = old_oid
+        self.new_oid = new_oid
+        self.delta_type = delta_type
+        self.similarity = similarity
+        self.old_path = old_path
+        self.new_path = new_path
 
 
 def build_context_lines(lines, line_index):

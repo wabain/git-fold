@@ -7,8 +7,21 @@ from contextlib import contextmanager
 from .errors import Fatal
 
 
+FileLineMapping = namedtuple('FileLineMapping', 'old_start,old_extent,new_start,new_extent')
 TreeListingEntry = namedtuple('TreeListingEntry', 'mode,obj_type,oid,path')
-CommitListingEntry = namedtuple('CommitListingEntry', 'oid,tree_oid,parents,a_name,a_email,a_date,c_name,c_email,c_date,message')
+BaseCommitListingEntry = namedtuple('BaseCommitListingEntry', 'oid,tree_oid,parents,a_name,a_email,a_date,c_name,c_email,c_date,message')
+
+
+class CommitListingEntry (BaseCommitListingEntry):
+    def summary(self):
+        end = self.message.find(b'\n')
+        if end < 0:
+            return self.message
+        return self.message[:end]
+
+    def oneline(self):
+        summary = self.summary().decode(errors='replace')
+        return f'{self.oid[:10]} {summary}'
 
 
 class RevList:
@@ -78,7 +91,7 @@ class Hunk:
         self.new_start = new_start
         self.ops = ops
 
-    def old_range(self, rev='HEAD'):
+    def old_range(self, rev):
         extent = sum(1
                      for (line_type, _) in self.ops
                      if line_type != DiffLineType.Add)
@@ -90,6 +103,58 @@ class Hunk:
             extent=extent,
         )
 
+    def get_edits(self, old_rev, new_rev):
+        """Yield tuples (old_range, new_range) indicating the edits needed"""
+        for mapping in self.map_lines():
+            old_range = IndexedRange(
+                rev=old_rev,
+                file=self.old_file,
+                start=mapping.old_start,
+                extent=mapping.old_extent,
+            )
+
+            new_range = IndexedRange(
+                rev=new_rev,
+                file=self.new_file,
+                start=mapping.new_start,
+                extent=mapping.new_extent,
+            )
+
+            yield old_range, new_range
+
+    def map_lines(self):
+        """Yield line mappings indicating the edits to apply the hunk"""
+        old_line, new_line = self.old_start, self.new_start
+        old_mstart, new_mstart = old_line, new_line
+        old_extent, new_extent = 0, 0
+
+        for line_type, _ in self.ops:
+            if line_type == DiffLineType.Context:
+                if old_extent != 0 or new_extent != 0:
+                    yield FileLineMapping(old_mstart, old_extent, new_mstart, new_extent)
+
+                old_line += 1
+                new_line += 1
+
+                old_mstart, new_mstart = old_line, new_line
+                old_extent = new_extent = 0
+                continue
+
+            if line_type == DiffLineType.Remove:
+                old_extent += 1
+                old_line += 1
+                continue
+
+            if line_type == DiffLineType.Add:
+                new_extent += 1
+                new_line += 1
+                continue
+
+            raise ValueError(line_type)
+
+        if old_extent != 0 or new_extent != 0:
+            yield FileLineMapping(old_mstart, old_extent, new_mstart, new_extent)
+
     def new_range_content(self, start, extent):
         if extent == 0:
             return b''
@@ -100,7 +165,7 @@ class Hunk:
             if start <= lineno < start + extent:
                 combined.append(line)
 
-        return b'\n'.join(combined)
+        return b''.join(combined)
 
     def __repr__(self):
         if self.old_file == self.new_file:
@@ -117,14 +182,16 @@ class Hunk:
 
 def ls_tree(*args):
     _, out, _ = call_git('ls-tree', *args)
-    out = out.decode()
     for line in out.splitlines():
-        yield TreeListingEntry(*line.split(maxsplit=3))
+        parts = line.split(maxsplit=3)
+        for i in range(3):
+            parts[i] = parts[i].decode()
+        yield TreeListingEntry(*parts)
 
 
 def mk_tree(entries):
     input = b'\n'.join(
-        f'{e.mode} {e.obj_type} {e.oid}\t{e.path}'.encode()
+        f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path
         for e in entries
     )
     _, out, _ = call_git('mktree', input=input)
@@ -225,10 +292,14 @@ class GitCall:
         with subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
             try:
                 yield proc
-                self.stdout, self.stderr = proc.communicate()
+                proc.wait()
             except:
                 proc.kill()
+                self.stdout, self.stderr = proc.stdout.read(), proc.stderr.read()
                 raise
+
+            self.stdout, self.stderr = proc.stdout.read(), proc.stderr.read()
+
             if proc.returncode != 0:
                 display_command = ' '.join(cmd)
                 raise Fatal(

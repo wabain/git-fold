@@ -13,7 +13,7 @@ def run_blame(indexed_range):
         '--',
         indexed_range.file,
     )
-    return parse_blame(indexed_range, out.decode().split('\n'))
+    return parse_blame(indexed_range, out.split(b'\n'))
 
 
 def parse_blame(src_range, blame_lines):
@@ -69,17 +69,18 @@ def parse_blame(src_range, blame_lines):
 
 
 def as_leader(parts):
+    """Try to parse blame line into a tuple (oid, old_lineno, new_lineno, starts_seq)"""
     # Line in format <HASH> <OLD-LINENO> <NEW-LINENO> [COUNT]
     if not (3 <= len(parts) <= 4 and
             is_int(parts[0], 16) and
             all(is_int(p, 10) for p in parts[1:])):
         return None
 
-    return parts[0], int(parts[1]), int(parts[2]), len(parts) == 4
+    return parts[0].decode(), int(parts[1]), int(parts[2]), len(parts) == 4
 
 
 def as_filename(parts):
-    if len(parts) != 2 or parts[0] != 'filename':
+    if len(parts) != 2 or parts[0] != b'filename':
         return None
     return parts[1]
 

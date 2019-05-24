@@ -23,14 +23,17 @@ For the first implementation, build on top of git blame.
 
 import sys
 
-from .diff_parser import DiffParser
+from .diff_parser import parse_diff_hunks
 from .errors import Fatal
 from .blame import run_blame
-from .git import RevList, call_git
+from .git import IndexedRange, RevList, call_git
 from .amend import AmendmentPlan
+from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
 
-def suggest_basic(paths):
+def suggest_basic(paths=None):
+    head = resolve_revision('HEAD')
+
     cmd_base = ['diff-index', '--cached', '--find-renames', '--patch', '--no-indent-heuristic', 'HEAD']
     if paths:
         cmd_base.append('--')
@@ -38,14 +41,51 @@ def suggest_basic(paths):
 
     _, diff, _ = call_git(*cmd_base)
 
-    # rev_list = RevList.for_range('HEAD', [])
-    plan = AmendmentPlan() #(rev_list)
+    plan = AmendmentPlan(head=head)
 
-    for hunk in DiffParser.parse_diff_hunks(diff):
-        source_range = hunk.old_range()
-        for old_range, new_range in run_blame(source_range):
+    for hunk in parse_diff_hunks(diff):
+        for old_range, new_range in hunk.get_edits(old_rev=head, new_rev='0' * 40):
+            # Can't handle insert-only edits for now; even using a heuristic
+            # like the source of the context lines, there's no guarantee that
+            # intervening lines weren't added then deleted around this point.
+            #
+            # Need to track the lines back via diff
+            if old_range.extent == 0:
+                continue
+
+            blame_outputs = list(run_blame(old_range))
+
+            if len(blame_outputs) > 1:
+                # Can't handle backporting to multiple commits when there are
+                # new changes to be applied
+                if new_range.extent > 0:
+                    continue
+
+                for partial_target_range, _ in blame_outputs:
+                    plan.amend_range(partial_target_range, b'')
+
+                continue
+
+            target_range, _ = blame_outputs[0]
             new_content = hunk.new_range_content(new_range.start, new_range.extent)
-            plan.amend_range(old_range, new_content)
+            plan.amend_range(target_range, new_content)
+
+    if not plan.commits:
+        return
 
     import pprint; pprint.pprint(plan.commits)
-    plan.write_commits()
+    # plan.write_commits(apply_strategy=DummyApplyStrategy()
+    final = plan.write_commits(apply_strategy=GitExecutableApplyStrategy())
+    return final
+
+
+def resolve_revision(head):
+    try:
+        _, out, _ = call_git('rev-parse', '--verify', head)
+    except Fatal as exc:
+        raise Fatal(
+            f'invalid revision {head!r}',
+            returncode=exc.returncode,
+            extended=exc.extended,
+        )
+    return out.strip().decode()
