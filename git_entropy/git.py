@@ -1,5 +1,5 @@
 import os
-import subprocess
+from subprocess import Popen, PIPE, run
 from enum import Enum
 from collections import namedtuple
 from contextlib import contextmanager
@@ -22,31 +22,6 @@ class CommitListingEntry (BaseCommitListingEntry):
     def oneline(self):
         summary = self.summary().decode(errors='replace')
         return f'{self.oid[:10]} {summary}'
-
-
-class RevList:
-    def __init__(self, revs):
-        self.revs = revs
-
-    @staticmethod
-    def for_range(rev_range, paths=None, reverse=False, walk=True):
-        cmd = ['rev-list', '--topo-order']
-        if not walk:
-            cmd.append('--no-walk')
-        if reverse:
-            cmd.append('--reverse')
-        cmd.extend(rev_range)
-        cmd.append('--')
-        if paths:
-            cmd.extend(paths)
-
-        _, out, _ = call_git(*cmd)
-        out = out.decode()
-        return RevList(out.strip().splitlines())
-
-    def write(self, f):
-        for rev in self.revs:
-            print(rev, file=f)
 
 
 class DiffLineType (Enum):
@@ -257,7 +232,7 @@ def call_git(*args, must_succeed=True, input=None, env=None):
         env = dict(os.environ)
         env.update(override_env)
 
-    outcome = subprocess.run(
+    outcome = run(
         command,
         input=input,
         env=env,
@@ -274,36 +249,28 @@ def call_git(*args, must_succeed=True, input=None, env=None):
     return outcome.returncode, outcome.stdout, outcome.stderr
 
 
-class GitCall:
-    def __init__(self):
-        self.stdout = None
-        self.stderr = None
+@contextmanager
+def call_git_async(*args, must_succeed=True, env=None):
+    cmd = ['git']
+    cmd.extend(args)
 
-    @contextmanager
-    def call_async(self, *args, stdin=None, env=None):
-        cmd = ['git']
-        cmd.extend(args)
+    if env is not None:
+        override_env = env
+        env = dict(os.environ)
+        env.update(override_env)
 
-        if env is not None:
-            override_env = env
-            env = dict(os.environ)
-            env.update(override_env)
+    with Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env) as proc:
+        try:
+            yield proc
+            proc.wait()
+        except:
+            proc.kill()
+            raise
 
-        with subprocess.Popen(cmd, stdin=stdin, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env) as proc:
-            try:
-                yield proc
-                proc.wait()
-            except:
-                proc.kill()
-                self.stdout, self.stderr = proc.stdout.read(), proc.stderr.read()
-                raise
-
-            self.stdout, self.stderr = proc.stdout.read(), proc.stderr.read()
-
-            if proc.returncode != 0:
-                display_command = ' '.join(cmd)
-                raise Fatal(
-                    f'failed to execute {display_command!r}',
-                    returncode=proc.returncode,
-                    extended=self.stderr.decode(errors='replace'),
-                )
+        if must_succeed and proc.returncode != 0:
+            display_command = ' '.join(cmd)
+            raise Fatal(
+                f'failed to execute {display_command!r}',
+                returncode=proc.returncode,
+                extended=proc.stderr.read().decode(errors='replace'),
+            )

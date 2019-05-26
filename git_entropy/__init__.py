@@ -26,12 +26,12 @@ import sys
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
 from .blame import run_blame
-from .git import IndexedRange, RevList, call_git
+from .git import call_git
 from .amend import AmendmentPlan
 from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
 
-def suggest_basic(paths=None):
+def suggest_basic(paths=None, is_dry_run=False):
     head = resolve_revision('HEAD')
 
     cmd_base = ['diff-index', '--cached', '--find-renames', '--patch', '--no-indent-heuristic', 'HEAD']
@@ -71,11 +71,16 @@ def suggest_basic(paths=None):
             plan.amend_range(target_range, new_content)
 
     if not plan.commits:
-        return
+        return None
 
-    import pprint; pprint.pprint(plan.commits)
-    # plan.write_commits(apply_strategy=DummyApplyStrategy()
-    final = plan.write_commits(apply_strategy=GitExecutableApplyStrategy())
+    # TODO: Add interactive mode
+
+    if is_dry_run:
+        apply_strategy = DummyApplyStrategy()
+    else:
+        apply_strategy = GitExecutableApplyStrategy()
+
+    final = plan.write_commits(apply_strategy=apply_strategy)
     return final
 
 

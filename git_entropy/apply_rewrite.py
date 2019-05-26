@@ -2,10 +2,9 @@
 """
 
 import os
-import tempfile
 from abc import ABC, abstractmethod
 
-from .git import TreeListingEntry, call_git, GitCall, ls_tree, mk_tree
+from .git import TreeListingEntry, call_git, call_git_async, ls_tree, mk_tree
 
 
 class AbstractApplyStrategy (ABC):
@@ -75,7 +74,6 @@ class GitExecutableApplyStrategy (AbstractApplyStrategy):
             )
         )
 
-
         if not amended_blobs_with_oids:
             return commit_info.tree_oid
 
@@ -114,16 +112,10 @@ class GitExecutableApplyStrategy (AbstractApplyStrategy):
     def write_blob(self, amended_blob):
         print('write blob:', amended_blob.commit[:10], amended_blob.file.decode(errors='replace'))
 
-        res = GitCall()
-        cmd = ['hash-object', '-tblob', '--stdin', '-w']
-
-        # with tempfile.NamedTemporaryFile() as pipe:
-        # r_fd, w_fd = os.pipe()
-        # with os.fdopen(r_fd, 'rb') as r_f, os.fdopen(w_fd, 'wb') as w_f:
-
-        import subprocess
-        with res.call_async(*cmd, stdin=subprocess.PIPE) as proc:
+        with call_git_async('hash-object', '-tblob', '--stdin', '-w') as proc:
             amended_blob.write(proc.stdin)
             proc.stdin.close()
 
-        return res.stdout.decode().strip()
+            out = proc.stdout.read()
+
+        return out.decode().strip()

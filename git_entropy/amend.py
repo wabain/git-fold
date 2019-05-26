@@ -4,19 +4,14 @@ This interface combines the functionality of git amend and git rebase,
 creating revisions to the log without affecting the working directory.
 """
 
-import os
 import bisect
 from itertools import chain
 from collections import namedtuple
 
 from .git import (
-    RevList,
     ls_tree,
-    mk_tree,
-    TreeListingEntry,
     cat_commit,
     call_git,
-    GitCall,
 )
 from .log import CommitGraph
 from .errors import Fatal
