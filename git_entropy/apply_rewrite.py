@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from .git import TreeListingEntry, call_git, call_git_async, ls_tree, mk_tree
 
 
-class AbstractApplyStrategy (ABC):
+class AbstractApplyStrategy(ABC):
     """Interface for strategies used to apply rewrites
 
     Each write method returns the resulting OID.
@@ -27,7 +27,7 @@ class AbstractApplyStrategy (ABC):
         raise NotImplementedError()
 
 
-class DummyApplyStrategy (AbstractApplyStrategy):
+class DummyApplyStrategy(AbstractApplyStrategy):
     """Simply return the original OIDs"""
 
     def write_commit(self, commit_info, tree, new_parents):
@@ -40,7 +40,7 @@ class DummyApplyStrategy (AbstractApplyStrategy):
         return f'{amended_blob.oid}/fake-amended'
 
 
-class GitExecutableApplyStrategy (AbstractApplyStrategy):
+class GitExecutableApplyStrategy(AbstractApplyStrategy):
     """Write the commits by calling out to the git executable"""
 
     def write_commit(self, commit_info, tree, new_parents):
@@ -71,15 +71,13 @@ class GitExecutableApplyStrategy (AbstractApplyStrategy):
             ' '.join(
                 b.file.decode(errors='replace') + f'={oid[:10]}'
                 for b, oid in amended_blobs_with_oids
-            )
+            ),
         )
 
         if not amended_blobs_with_oids:
             return commit_info.tree_oid
 
-        new_blobs = {
-            b.file: new_oid for b, new_oid in amended_blobs_with_oids
-        }
+        new_blobs = {b.file: new_oid for b, new_oid in amended_blobs_with_oids}
 
         dirs = set()
         for path in new_blobs:
@@ -101,7 +99,7 @@ class GitExecutableApplyStrategy (AbstractApplyStrategy):
                         mode=entry.mode,
                         obj_type=entry.obj_type,
                         oid=updated_entry_oid,
-                        path=os.path.basename(entry.path)
+                        path=os.path.basename(entry.path),
                     )
                 )
 
@@ -110,7 +108,11 @@ class GitExecutableApplyStrategy (AbstractApplyStrategy):
         return new_blobs['.']
 
     def write_blob(self, amended_blob):
-        print('write blob:', amended_blob.commit[:10], amended_blob.file.decode(errors='replace'))
+        print(
+            'write blob:',
+            amended_blob.commit[:10],
+            amended_blob.file.decode(errors='replace'),
+        )
 
         with call_git_async('hash-object', '-tblob', '--stdin', '-w') as proc:
             amended_blob.write(proc.stdin)

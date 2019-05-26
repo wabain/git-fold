@@ -9,7 +9,7 @@ from subprocess import run
 from .. import suggest_basic
 
 
-class SimpleIntegrationTest (TestCase):
+class SimpleIntegrationTest(TestCase):
 
     maxDiff = None
 
@@ -18,7 +18,6 @@ class SimpleIntegrationTest (TestCase):
             'GIT_CONFIG_NOSYSTEM': '1',
             'HOME': '/var/empty/doesntexist',
             'XDG_CONFIG_HOME': '/var/empty/doesntexist',
-
             'GIT_AUTHOR_NAME': 'git-entropy-test',
             'GIT_AUTHOR_EMAIL': 'git-entropy-test@example.org',
             'GIT_AUTHOR_DATE': '2019-05-26 14:35:38+00:00',
@@ -36,8 +35,9 @@ class SimpleIntegrationTest (TestCase):
         PART_3_V1 = ['thsi is the end.']
         PART_3_V2 = ['', 'This is the end.']
 
-        with TemporaryDirectory(prefix='git-entropy-test') as cwd, \
-                update_env(**env_overrides):
+        with TemporaryDirectory(prefix='git-entropy-test') as cwd, update_env(
+            **env_overrides
+        ):
 
             # Initial
             test_cmd(cwd, 'git init')
@@ -71,12 +71,11 @@ class SimpleIntegrationTest (TestCase):
                 os.chdir(old_cwd)
 
             res = test_cmd(
-                cwd,
-                ['git', 'range-diff', 'HEAD...' + final],
-                capture_output=True,
+                cwd, ['git', 'range-diff', 'HEAD...' + final], capture_output=True
             )
 
-            expected = dedent(r'''
+            expected = dedent(
+                r'''
                 1:  8d83d63 ! 1:  7a647a3 initial
                     @@ -8,5 +8,5 @@
                      +++ b/test_file
@@ -103,7 +102,8 @@ class SimpleIntegrationTest (TestCase):
                      -thsi is the end.
                      +
                      +This is the end.
-            ''').lstrip()
+            '''
+            ).lstrip()
 
             self.assertEqual(expected, res.stdout.decode())
 

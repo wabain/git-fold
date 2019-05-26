@@ -37,7 +37,9 @@ class CommitGraph:
 
     def add_path(self, head, root):
         """Add all commits on the ancestry path from head to root to the graph"""
-        _, output, _ = call_git('rev-list', '--parents', '--ancestry-path', head, '^' + root, '--')
+        _, output, _ = call_git(
+            'rev-list', '--parents', '--ancestry-path', head, '^' + root, '--'
+        )
         self._add_from_rev_list_parents(output)
 
     def _add_from_rev_list_parents(self, output):

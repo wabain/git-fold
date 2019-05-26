@@ -7,12 +7,17 @@ from contextlib import contextmanager
 from .errors import Fatal
 
 
-FileLineMapping = namedtuple('FileLineMapping', 'old_start,old_extent,new_start,new_extent')
+FileLineMapping = namedtuple(
+    'FileLineMapping', 'old_start,old_extent,new_start,new_extent'
+)
 TreeListingEntry = namedtuple('TreeListingEntry', 'mode,obj_type,oid,path')
-BaseCommitListingEntry = namedtuple('BaseCommitListingEntry', 'oid,tree_oid,parents,a_name,a_email,a_date,c_name,c_email,c_date,message')
+BaseCommitListingEntry = namedtuple(
+    'BaseCommitListingEntry',
+    'oid,tree_oid,parents,a_name,a_email,a_date,c_name,c_email,c_date,message',
+)
 
 
-class CommitListingEntry (BaseCommitListingEntry):
+class CommitListingEntry(BaseCommitListingEntry):
     def summary(self):
         end = self.message.find(b'\n')
         if end < 0:
@@ -24,7 +29,7 @@ class CommitListingEntry (BaseCommitListingEntry):
         return f'{self.oid[:10]} {summary}'
 
 
-class DiffLineType (Enum):
+class DiffLineType(Enum):
     Add = '+'
     Remove = '-'
     Context = ' '
@@ -43,7 +48,9 @@ class IndexedRange:
             for entry in ls_tree(self.rev, '--', self.file):
                 if entry.obj_type != 'blob':
                     # TODO: sanity check; maybe some non-blobs are okay
-                    raise ValueError(f'expected {self.file} at {self.rev} to be blob; got {entry.obj_type!r}')
+                    raise ValueError(
+                        f'expected {self.file} at {self.rev} to be blob; got {entry.obj_type!r}'
+                    )
                 self._oid = entry.oid
                 break
             else:
@@ -67,15 +74,10 @@ class Hunk:
         self.ops = ops
 
     def old_range(self, rev):
-        extent = sum(1
-                     for (line_type, _) in self.ops
-                     if line_type != DiffLineType.Add)
+        extent = sum(1 for (line_type, _) in self.ops if line_type != DiffLineType.Add)
 
         return IndexedRange(
-            rev=rev,
-            file=self.old_file,
-            start=self.old_start,
-            extent=extent,
+            rev=rev, file=self.old_file, start=self.old_start, extent=extent
         )
 
     def get_edits(self, old_rev, new_rev):
@@ -106,7 +108,9 @@ class Hunk:
         for line_type, _ in self.ops:
             if line_type == DiffLineType.Context:
                 if old_extent != 0 or new_extent != 0:
-                    yield FileLineMapping(old_mstart, old_extent, new_mstart, new_extent)
+                    yield FileLineMapping(
+                        old_mstart, old_extent, new_mstart, new_extent
+                    )
 
                 old_line += 1
                 new_line += 1
@@ -166,8 +170,7 @@ def ls_tree(*args):
 
 def mk_tree(entries):
     input = b'\n'.join(
-        f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path
-        for e in entries
+        f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
     _, out, _ = call_git('mktree', input=input)
     return out.decode().strip()
@@ -175,23 +178,19 @@ def mk_tree(entries):
 
 def cat_commit(rev):
     fields = [
-        '%H',   # hash
-        '%T',   # tree
-        '%P',   # parents
+        '%H',  # hash
+        '%T',  # tree
+        '%P',  # parents
         '%an',  # author name
         '%ae',  # author email
         '%ad',  # author date
         '%cn',  # committer name
         '%ce',  # committer email
         '%cd',  # committer date
-        '%B',   # body
+        '%B',  # body
     ]
     _, out, _ = call_git(
-        'rev-list',
-        '--max-count=1',
-        '--format=' + '%n'.join(fields),
-        '--date=raw',
-        rev,
+        'rev-list', '--max-count=1', '--format=' + '%n'.join(fields), '--date=raw', rev
     )
     lines = out.split(b'\n', maxsplit=len(fields))
 
@@ -207,7 +206,7 @@ def cat_commit(rev):
         c_email,
         c_date,
         message,
-     ) = lines
+    ) = lines
 
     return CommitListingEntry(
         oid=oid.decode(),
@@ -232,12 +231,7 @@ def call_git(*args, must_succeed=True, input=None, env=None):
         env = dict(os.environ)
         env.update(override_env)
 
-    outcome = run(
-        command,
-        input=input,
-        env=env,
-        capture_output=True,
-    )
+    outcome = run(command, input=input, env=env, capture_output=True)
 
     if must_succeed and outcome.returncode != 0:
         display_command = ' '.join(command)

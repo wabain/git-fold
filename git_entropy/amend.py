@@ -8,11 +8,7 @@ import bisect
 from itertools import chain
 from collections import namedtuple
 
-from .git import (
-    ls_tree,
-    cat_commit,
-    call_git,
-)
+from .git import ls_tree, cat_commit, call_git
 from .log import CommitGraph
 from .errors import Fatal
 from .diff_parser import parse_diff_hunks, parse_diff_tree_summary
@@ -31,7 +27,9 @@ class AmendmentPlan:
         try:
             for_blob = for_commit[indexed_range.file]
         except KeyError:
-            for_blob = AmendedBlob(indexed_range.rev, indexed_range.file, indexed_range.oid())
+            for_blob = AmendedBlob(
+                indexed_range.rev, indexed_range.file, indexed_range.oid()
+            )
             for_commit[indexed_range.file] = for_blob
         for_blob.replace_lines(indexed_range.start, indexed_range.extent, new_lines)
 
@@ -48,7 +46,9 @@ class AmendmentPlan:
             return out
 
     def write_commits(self, apply_strategy):
-        commit_graph = CommitGraph.build_partial(head=self.head, roots=list(self.commits))
+        commit_graph = CommitGraph.build_partial(
+            head=self.head, roots=list(self.commits)
+        )
 
         # Map { old_commit: (new_commit, { path: (amended_blob, new_oid) } }
         amended_commits = {}
@@ -79,61 +79,41 @@ class AmendmentPlan:
                 new_parents.append(new_parent)
 
                 for (blob, new_oid) in new_parent_amendments.values():
-                    parent_amendments.setdefault(blob.file, {})[blob.commit] = (blob, new_oid)
+                    parent_amendments.setdefault(blob.file, {})[blob.commit] = (
+                        blob,
+                        new_oid,
+                    )
 
             new_amendments = self.commits.get(to_rewrite)
             assert new_parents != parents or new_amendments is not None
 
             coalesced = self._coalesce_amended_blobs(
-                commit_info,
-                new_amendments or {},
-                parent_amendments,
+                commit_info, new_amendments or {}, parent_amendments
             )
             new_commit_oid, blobs_with_amendments = self._rewrite_commit(
-                apply_strategy,
-                commit_info,
-                new_parents,
-                coalesced,
+                apply_strategy, commit_info, new_parents, coalesced
             )
-            amended_commits[to_rewrite] = new_commit_oid, {
-                b.file: (b, o) for b, o in blobs_with_amendments
-            }
+            amended_commits[to_rewrite] = (
+                new_commit_oid,
+                {b.file: (b, o) for b, o in blobs_with_amendments},
+            )
 
         return amended_commits[self.head][0]
 
-    def _rewrite_commit(self,
-                        apply_strategy,
-                        commit_info,
-                        new_parents,
-                        amendments):
-
-        amended_with_oids = list(self._write_amended_blobs(
-            apply_strategy,
-            commit_info,
-            amendments,
-        ))
-
-        new_tree_oid = apply_strategy.write_tree(
-            commit_info,
-            amended_with_oids,
+    def _rewrite_commit(self, apply_strategy, commit_info, new_parents, amendments):
+        amended_with_oids = list(
+            self._write_amended_blobs(apply_strategy, commit_info, amendments)
         )
 
-        new_oid = apply_strategy.write_commit(
-            commit_info,
-            new_tree_oid,
-            new_parents,
-        )
+        new_tree_oid = apply_strategy.write_tree(commit_info, amended_with_oids)
+
+        new_oid = apply_strategy.write_commit(commit_info, new_tree_oid, new_parents)
 
         return new_oid, amended_with_oids
 
-    def _coalesce_amended_blobs(self,
-                                commit_info,
-                                new_amendments,
-                                parent_amendments):
-
+    def _coalesce_amended_blobs(self, commit_info, new_amendments, parent_amendments):
         coalesced = {
-            path: (amended_blob, None)
-            for path, amended_blob in new_amendments.items()
+            path: (amended_blob, None) for path, amended_blob in new_amendments.items()
         }
 
         need_full_reconcile = set(new_amendments) & set(parent_amendments)
@@ -146,7 +126,9 @@ class AmendmentPlan:
 
         parent_only_oid_info = {
             entry.path: entry.oid
-            for entry in ls_tree(commit_info.oid, '--', *(path for path, _ in parent_only))
+            for entry in ls_tree(
+                commit_info.oid, '--', *(path for path, _ in parent_only)
+            )
         }
 
         for path, parents in parent_only:
@@ -157,10 +139,7 @@ class AmendmentPlan:
                 continue
 
             parent_ff_info = self._find_fast_forward_parent(
-                path,
-                commit_info,
-                parents,
-                own_blob_oid,
+                path, commit_info, parents, own_blob_oid
             )
 
             if parent_ff_info:
@@ -182,19 +161,17 @@ class AmendmentPlan:
     def _find_fast_forward_parent(self, path, commit_info, parents, own_blob_oid):
         for parent_blob, new_parent_blob_oid in parents.values():
             if parent_blob.oid == own_blob_oid:
-                updated_blob = parent_blob.with_meta(commit_info.oid, path, own_blob_oid)
+                updated_blob = parent_blob.with_meta(
+                    commit_info.oid, path, own_blob_oid
+                )
                 return updated_blob, new_parent_blob_oid
         return None
 
-    def _handle_parent_changes_with_diff(self,
-                                         coalesced,
-                                         commit_info,
-                                         new_amendments,
-                                         parent_amendments,
-                                         needed_paths):
-
+    def _handle_parent_changes_with_diff(
+        self, coalesced, commit_info, new_amendments, parent_amendments, needed_paths
+    ):
         """
-        Run a diff against the parent to try reconstruct the chain of
+        Run a diff against each parent to try reconstruct the chain of
         amendments identified by git blame, including renames. Getting
         something more reliable probably requires either a complete
         reimplementation of git blame, or a fork of git to output tracking
@@ -206,7 +183,9 @@ class AmendmentPlan:
         partially_coalesced = dict(new_amendments)
 
         for old_parent in commit_info.parents:
-            _, diff_tree, _ = call_git('diff-tree', '--find-renames', old_parent, commit_info.oid)
+            _, diff_tree, _ = call_git(
+                'diff-tree', '--find-renames', old_parent, commit_info.oid
+            )
             diffed = {
                 entry.old_path: entry
                 for entry in parse_diff_tree_summary(diff_tree)
@@ -221,10 +200,14 @@ class AmendmentPlan:
                         f'looking at {old_parent}, diffing {entry.old_path}'
                     )
 
-                _, diff_output, _ = call_git('diff', '--patch-with-raw', entry.old_oid, entry.new_oid)
+                _, diff_output, _ = call_git(
+                    'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
+                )
                 diff_hunks = parse_diff_hunks(diff_output)
 
-                parent_changes, _new_parent_oid = parent_amendments[entry.old_path][old_parent]
+                parent_changes, _new_parent_oid = parent_amendments[entry.old_path][
+                    old_parent
+                ]
                 adjusted_changes = parent_changes.adjusted_by_diff(
                     diff_hunks,
                     commit=commit_info.oid,
@@ -237,8 +220,9 @@ class AmendmentPlan:
                 except KeyError:
                     partially_coalesced[entry.new_path] = adjusted_changes
                 else:
-                    partially_coalesced[entry.new_path] = \
-                        prior.with_merged_amendments(adjusted_changes.amendments)
+                    partially_coalesced[entry.new_path] = prior.with_merged_amendments(
+                        adjusted_changes.amendments
+                    )
 
         assert set(partially_coalesced) == needed_paths
         assert not set(coalesced) & set(partially_coalesced)

@@ -14,11 +14,15 @@ DIFF_NEW = re.compile(rb'^\+\+\+ ((?P<devnull>/dev/null)|b/(?P<fname>.*))')
 HUNK_REGEX = re.compile(rb'^@@ -(\d+)(,\d+)? \+(\d+)(,\d+)? @@')
 DIFF_BINARY = re.compile(rb'^Binary files .* and .* differ$')
 
-DIFF_TREE_FILE = re.compile(rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) (?=[^R])([A-Z])\t(.*)')
-DIFF_TREE_FILE_RENAME = re.compile(rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) R(\d+)\t(.*)\t(.*)')
+DIFF_TREE_FILE = re.compile(
+    rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) (?=[^R])([A-Z])\t(.*)'
+)
+DIFF_TREE_FILE_RENAME = re.compile(
+    rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) R(\d+)\t(.*)\t(.*)'
+)
 
 
-class DiffParseState (Enum):
+class DiffParseState(Enum):
     Invalid = -1
     Initial = 0
     DiffHeader = 1
@@ -72,10 +76,11 @@ class DiffParser:
 
     handlers = {}
 
-    def _register(state, handlers=handlers):  #pylint: disable=no-self-argument
+    def _register(state, handlers=handlers):  # pylint: disable=no-self-argument
         def inner(fn):
             handlers[state] = fn
             return fn
+
         return inner
 
     @classmethod
@@ -165,7 +170,6 @@ class DiffParser:
         attrs.ops.append((line_type, remainder))
         return DiffParseState.InHunk, attrs
 
-
     del _register
 
     @classmethod
@@ -173,11 +177,13 @@ class DiffParser:
         if attrs.old_file is None or attrs.new_file is None:
             return DIFF_PARSE_INVALID
 
-        attrs = NS(old_file=attrs.old_file,
-                   new_file=attrs.new_file,
-                   old_start=int(match.group(1)),
-                   new_start=int(match.group(3)),
-                   ops=[])
+        attrs = NS(
+            old_file=attrs.old_file,
+            new_file=attrs.new_file,
+            old_start=int(match.group(1)),
+            new_start=int(match.group(3)),
+            ops=[],
+        )
 
         return DiffParseState.InHunk, attrs
 
@@ -193,8 +199,9 @@ def parse_diff_tree_summary(diff_tree_lines):
         m = DIFF_TREE_FILE.match(line)
         if m:
             old_mode, new_mode, old_oid, new_oid, delta_type, new_path = m.groups()
-            old_mode, new_mode, old_oid, new_oid, delta_type = \
-                (v.decode() for v in [old_mode, new_mode, old_oid, new_oid, delta_type])
+            old_mode, new_mode, old_oid, new_oid, delta_type = (
+                v.decode() for v in [old_mode, new_mode, old_oid, new_oid, delta_type]
+            )
 
             old_path = None if all(n == '0' for n in old_oid) else new_path
             if all(n == '0' for n in new_oid):
@@ -208,9 +215,12 @@ def parse_diff_tree_summary(diff_tree_lines):
                     f'unable to parse diff-tree output line {idx + 1}:',
                     extended=build_context_lines(lines, idx),
                 )
-            old_mode, new_mode, old_oid, new_oid, similarity, old_path, new_path = m.groups()
-            old_mode, new_mode, old_oid, new_oid = \
-                (v.decode() for v in [old_mode, new_mode, old_oid, new_oid])
+            old_mode, new_mode, old_oid, new_oid, similarity, old_path, new_path = (
+                m.groups()
+            )
+            old_mode, new_mode, old_oid, new_oid = (
+                v.decode() for v in [old_mode, new_mode, old_oid, new_oid]
+            )
             similarity = int(similarity)
             delta_type = 'R'
 
@@ -231,15 +241,17 @@ def parse_diff_tree_summary(diff_tree_lines):
 
 
 class FileDiffSummary:
-    def __init__(self,
-                 old_mode,
-                 new_mode,
-                 old_oid,
-                 new_oid,
-                 delta_type,
-                 similarity,
-                 old_path,
-                 new_path):
+    def __init__(
+        self,
+        old_mode,
+        new_mode,
+        old_oid,
+        new_oid,
+        delta_type,
+        similarity,
+        old_path,
+        new_path,
+    ):
 
         self.old_mode = old_mode
         self.new_mode = new_mode
@@ -255,7 +267,9 @@ def build_context_lines(lines, line_index):
     start_index = max(line_index - 5, 0)
     context = []
     padding = max(3, len(str(line_index + 5)))
-    for i, ctx_line in enumerate(lines[start_index:line_index + 5], start=start_index):
+    for i, ctx_line in enumerate(
+        lines[start_index : line_index + 5], start=start_index
+    ):
         ctx_line = ctx_line.decode(errors='replace')
         context.append(f'{i + 1:<{padding}} {ctx_line}')
     return '\n'.join(context)

@@ -34,7 +34,14 @@ from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 def suggest_basic(paths=None, is_dry_run=False):
     head = resolve_revision('HEAD')
 
-    cmd_base = ['diff-index', '--cached', '--find-renames', '--patch', '--no-indent-heuristic', 'HEAD']
+    cmd_base = [
+        'diff-index',
+        '--cached',
+        '--find-renames',
+        '--patch',
+        '--no-indent-heuristic',
+        'HEAD',
+    ]
     if paths:
         cmd_base.append('--')
         cmd_base.extend(paths)

@@ -52,28 +52,35 @@ def parse_blame(src_range, blame_lines):
 
         if range_mapping and not starts_seq:
             last_old, last_new = range_mapping[-1]
-            if (last_old.file == filename and
-                    last_old.start + last_old.extent == old_line and
-                    last_new.start + last_new.extent == new_line):
+            if (
+                last_old.file == filename
+                and last_old.start + last_old.extent == old_line
+                and last_new.start + last_new.extent == new_line
+            ):
                 last_old.extent += 1
                 last_new.extent += 1
                 continue
 
-        range_mapping.append((
-            IndexedRange(rev=rev, file=filename, start=old_line, extent=1),
-            IndexedRange(rev=src_range.rev, file=src_range.file, start=new_line, extent=1),
-        ))
+        range_mapping.append(
+            (
+                IndexedRange(rev=rev, file=filename, start=old_line, extent=1),
+                IndexedRange(
+                    rev=src_range.rev, file=src_range.file, start=new_line, extent=1
+                ),
+            )
+        )
 
     return range_mapping
-
 
 
 def as_leader(parts):
     """Try to parse blame line into a tuple (oid, old_lineno, new_lineno, starts_seq)"""
     # Line in format <HASH> <OLD-LINENO> <NEW-LINENO> [COUNT]
-    if not (3 <= len(parts) <= 4 and
-            is_int(parts[0], 16) and
-            all(is_int(p, 10) for p in parts[1:])):
+    if not (
+        3 <= len(parts) <= 4
+        and is_int(parts[0], 16)
+        and all(is_int(p, 10) for p in parts[1:])
+    ):
         return None
 
     return parts[0].decode(), int(parts[1]), int(parts[2]), len(parts) == 4
