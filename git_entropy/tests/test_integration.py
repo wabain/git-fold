@@ -26,14 +26,14 @@ class SimpleIntegrationTest(TestCase):
             'GIT_COMMITTER_DATE': '2019-05-27 14:35:38+00:00',
         }
 
-        PART_1_V1 = ['this is a file.']
-        PART_1_V2 = ['This is a file.', '']
+        part_1_v1 = ['this is a file.']
+        part_1_v2 = ['This is a file.', '']
 
-        PART_2_V1 = ['hello world']
-        PART_2_V2 = ['Hello world.']
+        part_2_v1 = ['hello world']
+        part_2_v2 = ['Hello world.']
 
-        PART_3_V1 = ['thsi is the end.']
-        PART_3_V2 = ['', 'This is the end.']
+        part_3_v1 = ['thsi is the end.']
+        part_3_v2 = ['', 'This is the end.']
 
         with TemporaryDirectory(prefix='git-entropy-test') as cwd, update_env(
             **env_overrides
@@ -41,18 +41,18 @@ class SimpleIntegrationTest(TestCase):
 
             # Initial
             test_cmd(cwd, 'git init')
-            write_lines(cwd, 'test_file', PART_1_V1 + PART_2_V1 + PART_3_V1)
+            write_lines(cwd, 'test_file', part_1_v1 + part_2_v1 + part_3_v1)
             test_cmd(cwd, 'git add test_file')
             test_cmd(cwd, 'git commit -m initial')
 
             # Branch A
             test_cmd(cwd, 'git checkout -b A master')
-            write_lines(cwd, 'test_file', PART_1_V1 + PART_2_V1 + PART_3_V2)
+            write_lines(cwd, 'test_file', part_1_v1 + part_2_v1 + part_3_v2)
             test_cmd(cwd, 'git commit -m "variant a" test_file')
 
             # Branch B
             test_cmd(cwd, 'git checkout -b B master')
-            write_lines(cwd, 'test_file', PART_1_V2 + PART_2_V1 + PART_3_V1)
+            write_lines(cwd, 'test_file', part_1_v2 + part_2_v1 + part_3_v1)
             test_cmd(cwd, 'git commit -m "variant b" test_file')
 
             # Post-merge
@@ -60,7 +60,7 @@ class SimpleIntegrationTest(TestCase):
             test_cmd(cwd, 'git merge --no-ff --no-edit A B')
 
             # Staged
-            write_lines(cwd, 'test_file', PART_1_V2 + PART_2_V2 + PART_3_V2)
+            write_lines(cwd, 'test_file', part_1_v2 + part_2_v2 + part_3_v2)
             test_cmd(cwd, 'git add test_file')
 
             old_cwd = os.getcwd()
@@ -131,7 +131,7 @@ def test_cmd(cwd, cmd, **kwargs):
 
 
 def write_lines(cwd, fname, lines):
-    with open(os.path.join(cwd, fname), 'w') as f:
+    with open(os.path.join(cwd, fname), 'w') as target_file:
         for line in lines:
-            f.write(line)
-            f.write('\n')
+            target_file.write(line)
+            target_file.write('\n')

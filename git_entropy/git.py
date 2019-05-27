@@ -66,7 +66,7 @@ class IndexedRange:
 
 
 class Hunk:
-    def __init__(self, old_file, new_file, old_start, new_start, ops):
+    def __init__(self, *, old_file, new_file, old_start, new_start, ops):
         self.old_file = old_file
         self.new_file = new_file
         self.old_start = old_start
@@ -169,10 +169,10 @@ def ls_tree(*args):
 
 
 def mk_tree(entries):
-    input = b'\n'.join(
+    git_input = b'\n'.join(
         f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
-    _, out, _ = call_git('mktree', input=input)
+    _, out, _ = call_git('mktree', input=git_input)
     return out.decode().strip()
 
 
@@ -222,7 +222,9 @@ def cat_commit(rev):
     )
 
 
-def call_git(*args, must_succeed=True, input=None, env=None):
+def call_git(
+    *args, must_succeed=True, input=None, env=None
+):  # pylint: disable=redefined-builtin
     command = ['git']
     command.extend(args)
 

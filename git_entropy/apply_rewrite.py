@@ -81,18 +81,21 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
         dirs = set()
         for path in new_blobs:
-            d = os.path.dirname(path)
-            while d:
-                dirs.add(d)
-                d = os.path.dirname(d)
+            subdir = os.path.dirname(path)
+            while subdir:
+                dirs.add(subdir)
+                subdir = os.path.dirname(subdir)
 
-        dirs = sorted(dirs, key=lambda d: (d.count('/'), d), reverse=True)
+        dirs = sorted(
+            dirs, key=lambda subdir: (subdir.count('/'), subdir), reverse=True
+        )
+
         # Special case: the repository's root directory
         dirs.append('.')
 
-        for d in dirs:
+        for subdir in dirs:
             entries = []
-            for entry in ls_tree(commit_info.oid, '--', d + '/'):
+            for entry in ls_tree(commit_info.oid, '--', subdir + '/'):
                 updated_entry_oid = new_blobs.get(entry.path, entry.oid)
                 entries.append(
                     TreeListingEntry(
@@ -103,7 +106,7 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
                     )
                 )
 
-            new_blobs[d] = mk_tree(entries)
+            new_blobs[subdir] = mk_tree(entries)
 
         return new_blobs['.']
 

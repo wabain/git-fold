@@ -1,0 +1,17 @@
+[DESIGN]
+max-attributes = 12
+
+[MESSAGES CONTROL]
+
+good-names =
+    fn,i,j,k,v,r,x,y
+
+disable =
+    fixme,
+    missing-docstring,
+    # handled by black
+    format,
+    # given to false positives (e.g. multiline subclass method declarations)
+    duplicate-code,
+    # doesn't understand typing generics
+    unsubscriptable-object,

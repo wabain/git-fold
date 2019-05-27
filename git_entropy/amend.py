@@ -53,37 +53,15 @@ class AmendmentPlan:
         # Map { old_commit: (new_commit, { path: (amended_blob, new_oid) } }
         amended_commits = {}
 
-        print('targeted commits:')
-        _, out, _ = call_git('rev-list', '--format=%s', '--no-walk', *self.commits)
-        print(out.decode())
-
         for to_rewrite in commit_graph.reverse_topo_ordering(self.head):
-
             # FIXME: Might need a more scaleable way to do this? (e.g. batch)
             commit_info = cat_commit(to_rewrite)
             print('handling', commit_info.oneline())
 
             parents = commit_graph.get_parents(to_rewrite)
-            new_parents = []
-
-            # Map path -> {parent_commit_oid: (amended_blob, new_oid)...}
-            parent_amendments = {}
-
-            for parent in parents:
-                try:
-                    (new_parent, new_parent_amendments) = amended_commits[parent]
-                except:
-                    new_parents.append(parent)
-                    continue
-
-                new_parents.append(new_parent)
-
-                for (blob, new_oid) in new_parent_amendments.values():
-                    parent_amendments.setdefault(blob.file, {})[blob.commit] = (
-                        blob,
-                        new_oid,
-                    )
-
+            new_parents, parent_amendments = self._get_amended_parents(
+                parents, amended_commits
+            )
             new_amendments = self.commits.get(to_rewrite)
             assert new_parents != parents or new_amendments is not None
 
@@ -100,10 +78,38 @@ class AmendmentPlan:
 
         return amended_commits[self.head][0]
 
+    def _get_amended_parents(self, parents, amended_commits):
+        """Return a pair (new_parents, parent_amendments)
+
+        The former is an ordered list of the parent OIDs to be used for the
+        amended commit. The latter is a dict mapping from the path to a dict
+        from the original commit OID to the amended blob and the new OID for
+        that path.
+        """
+        new_parents = []
+
+        # Map path -> {parent_commit_oid: (amended_blob, new_oid)...}
+        parent_amendments = {}
+
+        for parent in parents:
+            try:
+                (new_parent, new_parent_amendments) = amended_commits[parent]
+            except KeyError:
+                new_parents.append(parent)
+                continue
+
+            new_parents.append(new_parent)
+
+            for (blob, new_oid) in new_parent_amendments.values():
+                parent_amendments.setdefault(blob.file, {})[blob.commit] = (
+                    blob,
+                    new_oid,
+                )
+
+        return new_parents, parent_amendments
+
     def _rewrite_commit(self, apply_strategy, commit_info, new_parents, amendments):
-        amended_with_oids = list(
-            self._write_amended_blobs(apply_strategy, commit_info, amendments)
-        )
+        amended_with_oids = list(self._write_amended_blobs(apply_strategy, amendments))
 
         new_tree_oid = apply_strategy.write_tree(commit_info, amended_with_oids)
 
@@ -183,46 +189,13 @@ class AmendmentPlan:
         partially_coalesced = dict(new_amendments)
 
         for old_parent in commit_info.parents:
-            _, diff_tree, _ = call_git(
-                'diff-tree', '--find-renames', old_parent, commit_info.oid
+            self._account_for_diff_against_parent(
+                partially_coalesced,
+                old_parent,
+                commit_info,
+                parent_amendments,
+                needed_paths,
             )
-            diffed = {
-                entry.old_path: entry
-                for entry in parse_diff_tree_summary(diff_tree)
-                if entry.old_path in needed_paths
-            }
-
-            for _, entry in sorted(diffed.items()):
-                # XXX: Wrong; not sure this is an error at all but it's definitely not an error per-parent
-                if entry.new_path is None:
-                    raise Fatal(
-                        f'unexpected diff entry during rewrite at {commit_info.oid}, '
-                        f'looking at {old_parent}, diffing {entry.old_path}'
-                    )
-
-                _, diff_output, _ = call_git(
-                    'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
-                )
-                diff_hunks = parse_diff_hunks(diff_output)
-
-                parent_changes, _new_parent_oid = parent_amendments[entry.old_path][
-                    old_parent
-                ]
-                adjusted_changes = parent_changes.adjusted_by_diff(
-                    diff_hunks,
-                    commit=commit_info.oid,
-                    file=entry.new_path,
-                    oid=entry.new_oid,
-                )
-
-                try:
-                    prior = partially_coalesced[entry.new_path]
-                except KeyError:
-                    partially_coalesced[entry.new_path] = adjusted_changes
-                else:
-                    partially_coalesced[entry.new_path] = prior.with_merged_amendments(
-                        adjusted_changes.amendments
-                    )
 
         assert set(partially_coalesced) == needed_paths
         assert not set(coalesced) & set(partially_coalesced)
@@ -231,7 +204,55 @@ class AmendmentPlan:
             for path, amended_blob in partially_coalesced.items()
         )
 
-    def _write_amended_blobs(self, apply_strategy, commit_info, amended_blobs):
+    def _account_for_diff_against_parent(
+        self,
+        partially_coalesced,
+        old_parent,
+        commit_info,
+        parent_amendments,
+        needed_paths,
+    ):
+        _, diff_tree, _ = call_git(
+            'diff-tree', '--find-renames', old_parent, commit_info.oid
+        )
+        diffed = {
+            entry.old_path: entry
+            for entry in parse_diff_tree_summary(diff_tree)
+            if entry.old_path in needed_paths
+        }
+
+        for _, entry in sorted(diffed.items()):
+            # XXX: Wrong; not sure this is an error at all but it's definitely not an error per-parent
+            if entry.new_path is None:
+                raise Fatal(
+                    f'unexpected diff entry during rewrite at {commit_info.oid}, '
+                    f'looking at {old_parent}, diffing {entry.old_path}'
+                )
+
+            _, diff_output, _ = call_git(
+                'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
+            )
+
+            parent_changes, _new_parent_oid = parent_amendments[entry.old_path][
+                old_parent
+            ]
+            adjusted_changes = parent_changes.adjusted_by_diff(
+                parse_diff_hunks(diff_output),
+                commit=commit_info.oid,
+                file=entry.new_path,
+                oid=entry.new_oid,
+            )
+
+            try:
+                prior = partially_coalesced[entry.new_path]
+            except KeyError:
+                partially_coalesced[entry.new_path] = adjusted_changes
+            else:
+                partially_coalesced[entry.new_path] = prior.with_merged_amendments(
+                    adjusted_changes.amendments
+                )
+
+    def _write_amended_blobs(self, apply_strategy, amended_blobs):
         for (amended_blob, reusable_oid) in amended_blobs.values():
             if reusable_oid is not None:
                 yield amended_blob, reusable_oid

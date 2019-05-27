@@ -1,6 +1,7 @@
 import re
 from enum import Enum
 from types import SimpleNamespace as NS
+from collections import namedtuple
 
 from .git import Hunk, DiffLineType
 from .errors import Fatal
@@ -19,6 +20,11 @@ DIFF_TREE_FILE = re.compile(
 )
 DIFF_TREE_FILE_RENAME = re.compile(
     rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) R(\d+)\t(.*)\t(.*)'
+)
+
+FileDiffSummary = namedtuple(
+    'FileDiffSummary',
+    'old_mode, new_mode, old_oid, new_oid, delta_type, similarity, old_path, new_path',
 )
 
 
@@ -72,14 +78,16 @@ class DiffParser:
             )
 
         if state == DiffParseState.InHunk:
-            yield Hunk(**attrs.__dict__)
+            yield Hunk(**attrs.__dict__)  # pylint: disable=missing-kwoa
 
     handlers = {}
 
-    def _register(state, handlers=handlers):  # pylint: disable=no-self-argument
-        def inner(fn):
-            handlers[state] = fn
-            return fn
+    def _register(
+        state, handlers=handlers
+    ):  # pylint: disable=no-self-argument,dangerous-default-value
+        def inner(func):
+            handlers[state] = func
+            return func
 
         return inner
 
@@ -114,53 +122,57 @@ class DiffParser:
             return DiffParseState.DiffHeader, attrs
 
         for r, v in [(DIFF_OLD, 'old_file'), (DIFF_NEW, 'new_file')]:
-            m = r.match(line)
-            if not m:
+            match = r.match(line)
+            if not match:
                 continue
 
             if getattr(attrs, v) is not None:
                 return DIFF_PARSE_INVALID
 
-            value = m.group('devnull')
+            value = match.group('devnull')
             if not value:
-                value = m.group('fname')
+                value = match.group('fname')
             setattr(attrs, v, value)
             return DiffParseState.DiffHeader, attrs
 
-        m = HUNK_REGEX.match(line)
-        if m:
-            return cls._handle_diff_hunk_start(line, attrs, m)
+        match = HUNK_REGEX.match(line)
+        if match:
+            return cls._handle_diff_hunk_start(line, attrs, match)
 
         return DIFF_PARSE_INVALID
 
     @_register(DiffParseState.InHunk)
     @classmethod
     def _handle_in_hunk(cls, attrs, line):
+        # pylint: disable=too-many-return-statements
+
         if DIFF_HEADER.match(line):
             hunk = Hunk(**attrs.__dict__)
             attrs = NS(old_file=None, new_file=None)
             return DiffParseState.DiffHeader, attrs, hunk
 
-        m = HUNK_REGEX.match(line)
-        if m:
+        match = HUNK_REGEX.match(line)
+        if match:
             hunk = Hunk(**attrs.__dict__)
-            return cls._handle_diff_hunk_start(line, attrs, m) + (hunk,)
+            return cls._handle_diff_hunk_start(line, attrs, match) + (hunk,)
 
         if not line:
             # This seems to happen occasionally, not sure when
             return DiffParseState.InHunk, attrs
 
         start, remainder = line[0], line[1:]
+        # Handle the "\ No newline at end of file" line
         if start == b'\\':
             if not attrs.ops:
                 return DIFF_PARSE_INVALID
-            t, ln = attrs.ops[-1]
-            if not ln.endswith(b'\n'):
+            last_op, last_line = attrs.ops[-1]
+            if not last_line.endswith(b'\n'):
+                # Sanity check
                 return DIFF_PARSE_INVALID
-            attrs.ops[-1] = t, ln[:-1]
+            attrs.ops[-1] = last_op, last_line[:-1]
             return DiffParseState.InHunk, attrs
-        else:
-            remainder += b'\n'
+
+        remainder += b'\n'
 
         try:
             line_type = DiffLineType(chr(start))
@@ -173,7 +185,7 @@ class DiffParser:
     del _register
 
     @classmethod
-    def _handle_diff_hunk_start(cls, line, attrs, match):
+    def _handle_diff_hunk_start(cls, _line, attrs, match):
         if attrs.old_file is None or attrs.new_file is None:
             return DIFF_PARSE_INVALID
 
@@ -196,9 +208,9 @@ def parse_diff_tree_summary(diff_tree_lines):
         if not line:
             continue
 
-        m = DIFF_TREE_FILE.match(line)
-        if m:
-            old_mode, new_mode, old_oid, new_oid, delta_type, new_path = m.groups()
+        match = DIFF_TREE_FILE.match(line)
+        if match:
+            old_mode, new_mode, old_oid, new_oid, delta_type, new_path = match.groups()
             old_mode, new_mode, old_oid, new_oid, delta_type = (
                 v.decode() for v in [old_mode, new_mode, old_oid, new_oid, delta_type]
             )
@@ -209,14 +221,14 @@ def parse_diff_tree_summary(diff_tree_lines):
 
             similarity = None
         else:
-            m = DIFF_TREE_FILE_RENAME.match(line)
-            if not m:
+            match = DIFF_TREE_FILE_RENAME.match(line)
+            if not match:
                 raise Fatal(
                     f'unable to parse diff-tree output line {idx + 1}:',
                     extended=build_context_lines(lines, idx),
                 )
             old_mode, new_mode, old_oid, new_oid, similarity, old_path, new_path = (
-                m.groups()
+                match.groups()
             )
             old_mode, new_mode, old_oid, new_oid = (
                 v.decode() for v in [old_mode, new_mode, old_oid, new_oid]
@@ -238,29 +250,6 @@ def parse_diff_tree_summary(diff_tree_lines):
         )
 
     return summary_lines
-
-
-class FileDiffSummary:
-    def __init__(
-        self,
-        old_mode,
-        new_mode,
-        old_oid,
-        new_oid,
-        delta_type,
-        similarity,
-        old_path,
-        new_path,
-    ):
-
-        self.old_mode = old_mode
-        self.new_mode = new_mode
-        self.old_oid = old_oid
-        self.new_oid = new_oid
-        self.delta_type = delta_type
-        self.similarity = similarity
-        self.old_path = old_path
-        self.new_path = new_path
 
 
 def build_context_lines(lines, line_index):

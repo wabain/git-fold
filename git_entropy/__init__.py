@@ -32,22 +32,9 @@ from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
 
 def suggest_basic(paths=None, is_dry_run=False):
+    _, diff, _ = call_git(*build_initial_diff_cmd(paths))
+
     head = resolve_revision('HEAD')
-
-    cmd_base = [
-        'diff-index',
-        '--cached',
-        '--find-renames',
-        '--patch',
-        '--no-indent-heuristic',
-        'HEAD',
-    ]
-    if paths:
-        cmd_base.append('--')
-        cmd_base.extend(paths)
-
-    _, diff, _ = call_git(*cmd_base)
-
     plan = AmendmentPlan(head=head)
 
     for hunk in parse_diff_hunks(diff):
@@ -89,6 +76,21 @@ def suggest_basic(paths=None, is_dry_run=False):
 
     final = plan.write_commits(apply_strategy=apply_strategy)
     return final
+
+
+def build_initial_diff_cmd(paths):
+    cmd = [
+        'diff-index',
+        '--cached',
+        '--find-renames',
+        '--patch',
+        '--no-indent-heuristic',
+        'HEAD',
+    ]
+    if paths:
+        cmd.append('--')
+        cmd.extend(paths)
+    return cmd
 
 
 def resolve_revision(head):
