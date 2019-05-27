@@ -69,15 +69,15 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
         print(
             'amended tree:',
             ' '.join(
-                b.file.decode(errors='replace') + f'={oid[:10]}'
-                for b, oid in amended_blobs_with_oids
+                b.file.decode(errors='replace') + f'={b.amended_oid[:10]}'
+                for b in amended_blobs_with_oids
             ),
         )
 
         if not amended_blobs_with_oids:
             return commit_info.tree_oid
 
-        new_blobs = {b.file: new_oid for b, new_oid in amended_blobs_with_oids}
+        new_blobs = {b.file: b.amended_oid for b in amended_blobs_with_oids}
 
         dirs = set()
         for path in new_blobs:

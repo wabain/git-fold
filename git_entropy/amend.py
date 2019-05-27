@@ -73,7 +73,7 @@ class AmendmentPlan:
             )
             amended_commits[to_rewrite] = (
                 new_commit_oid,
-                {b.file: (b, o) for b, o in blobs_with_amendments},
+                {b.file: b for b in blobs_with_amendments},
             )
 
         return amended_commits[self.head][0]
@@ -100,11 +100,8 @@ class AmendmentPlan:
 
             new_parents.append(new_parent)
 
-            for (blob, new_oid) in new_parent_amendments.values():
-                parent_amendments.setdefault(blob.file, {})[blob.commit] = (
-                    blob,
-                    new_oid,
-                )
+            for blob in new_parent_amendments.values():
+                parent_amendments.setdefault(blob.file, {})[parent] = blob
 
         return new_parents, parent_amendments
 
@@ -118,10 +115,7 @@ class AmendmentPlan:
         return new_oid, amended_with_oids
 
     def _coalesce_amended_blobs(self, commit_info, new_amendments, parent_amendments):
-        coalesced = {
-            path: (amended_blob, None) for path, amended_blob in new_amendments.items()
-        }
-
+        coalesced = dict(new_amendments)
         need_full_reconcile = set(new_amendments) & set(parent_amendments)
 
         parent_only = [
@@ -144,12 +138,12 @@ class AmendmentPlan:
                 need_full_reconcile.add(path)
                 continue
 
-            parent_ff_info = self._find_fast_forward_parent(
+            ff_parent = self._find_fast_forward_parent(
                 path, commit_info, parents, own_blob_oid
             )
 
-            if parent_ff_info:
-                coalesced[path] = parent_ff_info
+            if ff_parent:
+                coalesced[path] = ff_parent
             else:
                 need_full_reconcile.add(path)
 
@@ -165,12 +159,10 @@ class AmendmentPlan:
         return coalesced
 
     def _find_fast_forward_parent(self, path, commit_info, parents, own_blob_oid):
-        for parent_blob, new_parent_blob_oid in parents.values():
-            if parent_blob.oid == own_blob_oid:
-                updated_blob = parent_blob.with_meta(
-                    commit_info.oid, path, own_blob_oid
-                )
-                return updated_blob, new_parent_blob_oid
+        for parent_blob in parents.values():
+            if parent_blob.oid != own_blob_oid:
+                continue
+            return parent_blob.with_meta(commit_info.oid, path, own_blob_oid)
         return None
 
     def _handle_parent_changes_with_diff(
@@ -188,10 +180,10 @@ class AmendmentPlan:
         """
         partially_coalesced = dict(new_amendments)
 
-        for old_parent in commit_info.parents:
+        for old_parent_oid in commit_info.parents:
             self._account_for_diff_against_parent(
                 partially_coalesced,
-                old_parent,
+                old_parent_oid,
                 commit_info,
                 parent_amendments,
                 needed_paths,
@@ -199,21 +191,18 @@ class AmendmentPlan:
 
         assert set(partially_coalesced) == needed_paths
         assert not set(coalesced) & set(partially_coalesced)
-        coalesced.update(
-            (path, (amended_blob, None))
-            for path, amended_blob in partially_coalesced.items()
-        )
+        coalesced.update(partially_coalesced)
 
     def _account_for_diff_against_parent(
         self,
         partially_coalesced,
-        old_parent,
+        old_parent_oid,
         commit_info,
         parent_amendments,
         needed_paths,
     ):
         _, diff_tree, _ = call_git(
-            'diff-tree', '--find-renames', old_parent, commit_info.oid
+            'diff-tree', '--find-renames', old_parent_oid, commit_info.oid
         )
         diffed = {
             entry.old_path: entry
@@ -226,16 +215,14 @@ class AmendmentPlan:
             if entry.new_path is None:
                 raise Fatal(
                     f'unexpected diff entry during rewrite at {commit_info.oid}, '
-                    f'looking at {old_parent}, diffing {entry.old_path}'
+                    f'looking at {old_parent_oid}, diffing {entry.old_path}'
                 )
 
             _, diff_output, _ = call_git(
                 'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
             )
 
-            parent_changes, _new_parent_oid = parent_amendments[entry.old_path][
-                old_parent
-            ]
+            parent_changes = parent_amendments[entry.old_path][old_parent_oid]
             adjusted_changes = parent_changes.adjusted_by_diff(
                 parse_diff_hunks(diff_output),
                 commit=commit_info.oid,
@@ -253,19 +240,20 @@ class AmendmentPlan:
                 )
 
     def _write_amended_blobs(self, apply_strategy, amended_blobs):
-        for (amended_blob, reusable_oid) in amended_blobs.values():
-            if reusable_oid is not None:
-                yield amended_blob, reusable_oid
+        for amended_blob in amended_blobs.values():
+            if amended_blob.amended_oid is not None:
+                yield amended_blob
             else:
                 new_oid = apply_strategy.write_blob(amended_blob)
-                yield (amended_blob, new_oid)
+                yield amended_blob.with_amended_oid(new_oid)
 
 
 class AmendedBlob:
-    def __init__(self, commit, file, oid):
+    def __init__(self, commit, file, oid, amended_oid=None):
         self.commit = commit
         self.file = file
         self.oid = oid
+        self.amended_oid = amended_oid
         self.amendments = []
 
     def replace_lines(self, start, extent, new_lines):
@@ -289,19 +277,26 @@ class AmendedBlob:
         self.amendments.insert(index, record)
 
     def with_merged_amendments(self, amendments):
-        copy = AmendedBlob(self.commit, self.file, self.oid)
+        copy = AmendedBlob(self.commit, self.file, self.oid, amended_oid=None)
         copy.amendments = list(self.amendments)
         for record in amendments:
             copy.replace_lines(record.start, record.extent, record.replacement)
         return copy
 
     def with_meta(self, commit, file, oid):
-        adjusted = AmendedBlob(commit, file, oid)
+        adjusted = AmendedBlob(commit, file, oid, amended_oid=self.amended_oid)
         adjusted.amendments.extend(self.amendments)
         return adjusted
 
+    def with_amended_oid(self, amended_oid):
+        if self.amended_oid is not None:
+            raise ValueError(f'Associating amended OID {amended_oid!r} with {self!r}')
+        amended = AmendedBlob(self.commit, self.file, self.oid, amended_oid)
+        amended.amendments.extend(self.amendments)
+        return amended
+
     def adjusted_by_diff(self, diff_hunks, commit, file, oid):
-        adjusted = AmendedBlob(commit, file, oid)
+        adjusted = AmendedBlob(commit, file, oid, amended_oid=None)
 
         offset = 0
         for entry in self._stream_amendments_and_diff_hunks(diff_hunks):
@@ -350,6 +345,9 @@ class AmendedBlob:
             yield from line_map_iter
 
     def write(self, output):
+        if self.amended_oid is not None:
+            raise ValueError(f'Writing blob for {self!r}')
+
         # TODO: Stream instead of buffering in memory
         file_rev = f'{self.commit}:'.encode() + self.file
         _, out, _ = call_git('cat-file', '-p', file_rev)
@@ -369,3 +367,12 @@ class AmendedBlob:
                     continue
 
             output.write(line)
+
+    def __repr__(self):
+        class_name = type(self).__name__
+        file_repr = self.file.decode(errors='replace')
+        if self.amended_oid is not None:
+            oids = f'{self.oid[:10]} -> {self.amended_oid[:10]}'
+        else:
+            oids = f'from {self.oid[:10]}'
+        return f'<{class_name} {self.commit[:10]}:{file_repr}, {oids}>'
