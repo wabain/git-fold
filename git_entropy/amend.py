@@ -202,7 +202,7 @@ class AmendmentPlan:
         needed_paths,
     ):
         _, diff_tree, _ = call_git(
-            'diff-tree', '--find-renames', old_parent_oid, commit_info.oid
+            'diff-tree', '-r', '--find-renames', old_parent_oid, commit_info.oid
         )
         diffed = {
             entry.old_path: entry

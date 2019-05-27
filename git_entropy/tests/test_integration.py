@@ -41,27 +41,28 @@ class SimpleIntegrationTest(TestCase):
 
             # Initial
             test_cmd(cwd, 'git init')
-            write_lines(cwd, 'test_file', part_1_v1 + part_2_v1 + part_3_v1)
-            test_cmd(cwd, 'git add test_file')
+            os.mkdir(os.path.join(cwd, 'test_dir'))
+            write_lines(cwd, 'test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v1)
+            test_cmd(cwd, 'git add test_dir/test_file')
             test_cmd(cwd, 'git commit -m initial')
 
             # Branch A
             test_cmd(cwd, 'git checkout -b A master')
-            write_lines(cwd, 'test_file', part_1_v1 + part_2_v1 + part_3_v2)
-            test_cmd(cwd, 'git commit -m "variant a" test_file')
+            write_lines(cwd, 'test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v2)
+            test_cmd(cwd, 'git commit -m "variant a" test_dir/test_file')
 
             # Branch B
             test_cmd(cwd, 'git checkout -b B master')
-            write_lines(cwd, 'test_file', part_1_v2 + part_2_v1 + part_3_v1)
-            test_cmd(cwd, 'git commit -m "variant b" test_file')
+            write_lines(cwd, 'test_dir/test_file', part_1_v2 + part_2_v1 + part_3_v1)
+            test_cmd(cwd, 'git commit -m "variant b" test_dir/test_file')
 
             # Post-merge
             test_cmd(cwd, 'git checkout master')
             test_cmd(cwd, 'git merge --no-ff --no-edit A B')
 
             # Staged
-            write_lines(cwd, 'test_file', part_1_v2 + part_2_v2 + part_3_v2)
-            test_cmd(cwd, 'git add test_file')
+            write_lines(cwd, 'test_dir/test_file', part_1_v2 + part_2_v2 + part_3_v2)
+            test_cmd(cwd, 'git add test_dir/test_file')
 
             old_cwd = os.getcwd()
             try:
@@ -76,15 +77,15 @@ class SimpleIntegrationTest(TestCase):
 
             expected = dedent(
                 r'''
-                1:  8d83d63 ! 1:  7a647a3 initial
+                1:  b45bf44 ! 1:  af6289a initial
                     @@ -8,5 +8,5 @@
-                     +++ b/test_file
+                     +++ b/test_dir/test_file
                      @@
                      +this is a file.
                     -+hello world
                     ++Hello world.
                      +thsi is the end.
-                2:  7fceb2b ! 2:  1ea94ab variant b
+                2:  7954059 ! 2:  324846c variant b
                     @@ -9,5 +9,5 @@
                      -this is a file.
                      +This is a file.
@@ -92,9 +93,9 @@ class SimpleIntegrationTest(TestCase):
                     - hello world
                     + Hello world.
                       thsi is the end.
-                3:  b0f7e92 ! 3:  5967efd variant a
+                3:  c18be95 ! 3:  c4fee68 variant a
                     @@ -7,7 +7,7 @@
-                     +++ b/test_file
+                     +++ b/test_dir/test_file
                      @@
                       this is a file.
                     - hello world
@@ -102,7 +103,7 @@ class SimpleIntegrationTest(TestCase):
                      -thsi is the end.
                      +
                      +This is the end.
-            '''
+                '''
             ).lstrip()
 
             self.assertEqual(expected, res.stdout.decode())

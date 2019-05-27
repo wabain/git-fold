@@ -87,15 +87,15 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
                 subdir = os.path.dirname(subdir)
 
         dirs = sorted(
-            dirs, key=lambda subdir: (subdir.count('/'), subdir), reverse=True
+            dirs, key=lambda subdir: (subdir.count(b'/'), subdir), reverse=True
         )
 
         # Special case: the repository's root directory
-        dirs.append('.')
+        dirs.append(b'.')
 
         for subdir in dirs:
             entries = []
-            for entry in ls_tree(commit_info.oid, '--', subdir + '/'):
+            for entry in ls_tree(commit_info.oid, '--', subdir + b'/'):
                 updated_entry_oid = new_blobs.get(entry.path, entry.oid)
                 entries.append(
                     TreeListingEntry(
@@ -108,7 +108,7 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
             new_blobs[subdir] = mk_tree(entries)
 
-        return new_blobs['.']
+        return new_blobs[b'.']
 
     def write_blob(self, amended_blob):
         print(
