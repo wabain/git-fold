@@ -35,44 +35,39 @@ class SimpleIntegrationTest(TestCase):
         part_3_v1 = ['thsi is the end.']
         part_3_v2 = ['', 'This is the end.']
 
-        with TemporaryDirectory(prefix='git-entropy-test') as cwd, update_env(
-            **env_overrides
-        ):
+        with TemporaryDirectory(prefix='git-entropy-test') as cwd, change_dir(
+            cwd
+        ), update_env(**env_overrides):
 
             # Initial
-            test_cmd(cwd, 'git init')
-            os.mkdir(os.path.join(cwd, 'test_dir'))
-            write_lines(cwd, 'test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v1)
-            test_cmd(cwd, 'git add test_dir/test_file')
-            test_cmd(cwd, 'git commit -m initial')
+            test_cmd('git init')
+            os.mkdir('test_dir')
+            write_lines('test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v1)
+            test_cmd('git add test_dir/test_file')
+            test_cmd('git commit -m initial')
 
             # Branch A
-            test_cmd(cwd, 'git checkout -b A master')
-            write_lines(cwd, 'test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v2)
-            test_cmd(cwd, 'git commit -m "variant a" test_dir/test_file')
+            test_cmd('git checkout -b A master')
+            write_lines('test_dir/test_file', part_1_v1 + part_2_v1 + part_3_v2)
+            test_cmd('git commit -m "variant a" test_dir/test_file')
 
             # Branch B
-            test_cmd(cwd, 'git checkout -b B master')
-            write_lines(cwd, 'test_dir/test_file', part_1_v2 + part_2_v1 + part_3_v1)
-            test_cmd(cwd, 'git commit -m "variant b" test_dir/test_file')
+            test_cmd('git checkout -b B master')
+            write_lines('test_dir/test_file', part_1_v2 + part_2_v1 + part_3_v1)
+            test_cmd('git commit -m "variant b" test_dir/test_file')
 
             # Post-merge
-            test_cmd(cwd, 'git checkout master')
-            test_cmd(cwd, 'git merge --no-ff --no-edit A B')
+            test_cmd('git checkout master')
+            test_cmd('git merge --no-ff --no-edit A B')
 
             # Staged
-            write_lines(cwd, 'test_dir/test_file', part_1_v2 + part_2_v2 + part_3_v2)
-            test_cmd(cwd, 'git add test_dir/test_file')
+            write_lines('test_dir/test_file', part_1_v2 + part_2_v2 + part_3_v2)
+            test_cmd('git add test_dir/test_file')
 
-            old_cwd = os.getcwd()
-            try:
-                os.chdir(cwd)
-                final = suggest_basic()
-            finally:
-                os.chdir(old_cwd)
+            final = suggest_basic()
 
             res = test_cmd(
-                cwd, ['git', 'range-diff', 'HEAD...' + final], capture_output=True
+                ['git', 'range-diff', 'HEAD...' + final], capture_output=True
             )
 
             expected = dedent(
@@ -110,6 +105,16 @@ class SimpleIntegrationTest(TestCase):
 
 
 @contextmanager
+def change_dir(cwd):
+    old_cwd = os.getcwd()
+    try:
+        os.chdir(cwd)
+        yield
+    finally:
+        os.chdir(old_cwd)
+
+
+@contextmanager
 def update_env(**kwargs):
     old_env = dict(os.environ)
     os.environ.update(kwargs)
@@ -123,16 +128,15 @@ def update_env(**kwargs):
         os.environ.update(old_env)
 
 
-def test_cmd(cwd, cmd, **kwargs):
+def test_cmd(cmd, **kwargs):
     if isinstance(cmd, str):
         # test calls don't need to worry much about input validation
         cmd = shlex.split(cmd)
-    kwargs = {'check': True, **kwargs, 'cwd': cwd}
-    return run(cmd, **kwargs)
+    return run(cmd, check=True, **kwargs)
 
 
-def write_lines(cwd, fname, lines):
-    with open(os.path.join(cwd, fname), 'w') as target_file:
+def write_lines(fname, lines):
+    with open(fname, 'w') as target_file:
         for line in lines:
             target_file.write(line)
             target_file.write('\n')
