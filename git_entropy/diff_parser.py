@@ -160,7 +160,7 @@ class DiffParser:
             # This seems to happen occasionally, not sure when
             return DiffParseState.InHunk, attrs
 
-        start, remainder = line[0], line[1:]
+        start, remainder = line[:1], line[1:]
         # Handle the "\ No newline at end of file" line
         if start == b'\\':
             if not attrs.ops:
@@ -175,7 +175,7 @@ class DiffParser:
         remainder += b'\n'
 
         try:
-            line_type = DiffLineType(chr(start))
+            line_type = DiffLineType(start.decode(errors='replace'))
         except ValueError:
             return DIFF_PARSE_INVALID
 
