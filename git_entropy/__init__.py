@@ -65,7 +65,7 @@ def suggest_basic(paths=None, is_dry_run=False):
             plan.amend_range(target_range, new_content)
 
     if not plan.commits:
-        return None
+        return head, head
 
     # TODO: Add interactive mode
 
@@ -75,7 +75,7 @@ def suggest_basic(paths=None, is_dry_run=False):
         apply_strategy = GitExecutableApplyStrategy()
 
     final = plan.write_commits(apply_strategy=apply_strategy)
-    return final
+    return head, final
 
 
 def build_initial_diff_cmd(paths):

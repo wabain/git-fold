@@ -64,10 +64,10 @@ class SimpleIntegrationTest(TestCase):
             write_lines('test_dir/test_file', part_1_v2 + part_2_v2 + part_3_v2)
             test_cmd('git add test_dir/test_file')
 
-            final = suggest_basic()
+            old_head, new_head = suggest_basic()
 
             res = test_cmd(
-                ['git', 'range-diff', 'HEAD...' + final], capture_output=True
+                ['git', 'range-diff', f'{old_head}...{new_head}'], capture_output=True
             )
 
             expected = dedent(

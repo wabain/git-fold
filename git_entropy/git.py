@@ -223,7 +223,7 @@ def cat_commit(rev):
 
 
 def call_git(
-    *args, must_succeed=True, input=None, env=None
+    *args, must_succeed=True, input=None, env=None, capture_output=True
 ):  # pylint: disable=redefined-builtin
     command = ['git']
     command.extend(args)
@@ -233,7 +233,7 @@ def call_git(
         env = dict(os.environ)
         env.update(override_env)
 
-    outcome = run(command, input=input, env=env, capture_output=True)
+    outcome = run(command, input=input, env=env, capture_output=capture_output)
 
     if must_succeed and outcome.returncode != 0:
         display_command = ' '.join(command)
