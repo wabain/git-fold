@@ -8,6 +8,17 @@ from .errors import Fatal
 
 def main():
     parser = argparse.ArgumentParser('git entropy')
+
+    root_opts = parser.add_mutually_exclusive_group(required=True)
+    root_opts.add_argument(
+        'upstream',
+        nargs='?',
+        help='Root commit whose children should be considered for revision',
+    )
+    root_opts.add_argument(
+        '--root', help='Consider all commits', required=False, action='store_true'
+    )
+
     parser.add_argument(
         'path', nargs='*', help='Staged paths to absorb (default: all staged paths)'
     )
@@ -19,7 +30,7 @@ def main():
     )
     args = parser.parse_args()
 
-    old_head, new_head = suggest_basic(paths=args.path)
+    old_head, new_head = suggest_basic(paths=args.path, root_rev=args.upstream)
 
     if new_head == old_head:
         return

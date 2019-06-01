@@ -31,10 +31,12 @@ from .amend import AmendmentPlan
 from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
 
-def suggest_basic(paths=None, is_dry_run=False):
+def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
+    head = resolve_revision('HEAD')
+    root_rev = None if root_rev is None else resolve_revision(root_rev)
+
     _, diff, _ = call_git(*build_initial_diff_cmd(paths))
 
-    head = resolve_revision('HEAD')
     plan = AmendmentPlan(head=head)
 
     for hunk in parse_diff_hunks(diff):
@@ -47,7 +49,10 @@ def suggest_basic(paths=None, is_dry_run=False):
             if old_range.extent == 0:
                 continue
 
-            blame_outputs = list(run_blame(old_range))
+            blame_outputs = run_blame(old_range, root_rev=root_rev)
+
+            if not blame_outputs:
+                continue
 
             if len(blame_outputs) > 1:
                 # Can't handle backporting to multiple commits when there are

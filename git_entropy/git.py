@@ -236,11 +236,16 @@ def call_git(
     outcome = run(command, input=input, env=env, capture_output=capture_output)
 
     if must_succeed and outcome.returncode != 0:
-        display_command = ' '.join(command)
+        display_command = ' '.join(
+            c.decode(errors='replace') if isinstance(c, bytes) else c for c in command
+        )
         raise Fatal(
             f'failed to execute {display_command!r}',
             returncode=outcome.returncode,
-            extended=outcome.stderr.decode(errors='replace'),
+            extended='\n'.join(
+                f'git: {line}'.rstrip()
+                for line in outcome.stderr.decode(errors='replace').splitlines()
+            ),
         )
     return outcome.returncode, outcome.stdout, outcome.stderr
 
