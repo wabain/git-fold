@@ -115,8 +115,13 @@ class AmendmentPlan:
         return new_oid, amended_with_oids
 
     def _coalesce_amended_blobs(self, commit_info, new_amendments, parent_amendments):
-        coalesced = dict(new_amendments)
         need_full_reconcile = set(new_amendments) & set(parent_amendments)
+
+        coalesced = {
+            path: amended_blob
+            for path, amended_blob in new_amendments.items()
+            if path not in need_full_reconcile
+        }
 
         parent_only = [
             (path, parents)
@@ -178,10 +183,13 @@ class AmendmentPlan:
         Note that libgit2 doesn't have a good blame implementation, so that
         isn't an option.
         """
-        partially_coalesced = dict(new_amendments)
+        partially_coalesced = {
+            path: blob for path, blob in new_amendments.items() if path in needed_paths
+        }
+        handled = set()
 
         for old_parent_oid in commit_info.parents:
-            self._account_for_diff_against_parent(
+            handled |= self._account_for_diff_against_parent(
                 partially_coalesced,
                 old_parent_oid,
                 commit_info,
@@ -189,7 +197,7 @@ class AmendmentPlan:
                 needed_paths,
             )
 
-        assert set(partially_coalesced) == needed_paths
+        assert handled == needed_paths
         assert not set(coalesced) & set(partially_coalesced)
         coalesced.update(partially_coalesced)
 
@@ -209,6 +217,7 @@ class AmendmentPlan:
             for entry in parse_diff_tree_summary(diff_tree)
             if entry.old_path in needed_paths
         }
+        handled = set()
 
         for _, entry in sorted(diffed.items()):
             # XXX: Wrong; not sure this is an error at all but it's definitely not an error per-parent
@@ -230,6 +239,8 @@ class AmendmentPlan:
                 oid=entry.new_oid,
             )
 
+            handled.add(entry.old_path)
+
             try:
                 prior = partially_coalesced[entry.new_path]
             except KeyError:
@@ -238,6 +249,8 @@ class AmendmentPlan:
                 partially_coalesced[entry.new_path] = prior.with_merged_amendments(
                     adjusted_changes.amendments
                 )
+
+        return handled
 
     def _write_amended_blobs(self, apply_strategy, amended_blobs):
         for amended_blob in amended_blobs.values():
