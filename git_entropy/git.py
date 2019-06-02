@@ -146,15 +146,34 @@ class Hunk:
 
         return b''.join(combined)
 
+    def __eq__(self, other):
+        if not isinstance(other, Hunk):
+            return NotImplemented
+
+        return (
+            self.old_file == other.old_file
+            and self.new_file == other.new_file
+            and self.old_start == other.old_start
+            and self.new_start == other.new_start
+            and self.ops == other.ops
+        )
+
     def __repr__(self):
+        display_old_file = (
+            None if self.old_file is None else self.old_file.decode(errors='replace')
+        )
+        display_new_file = (
+            None if self.new_file is None else self.new_file.decode(errors='replace')
+        )
+
         if self.old_file == self.new_file:
-            f_repr = repr(self.old_file)
-        elif self.old_file == '/dev/null':
-            f_repr = f'create {self.new_file!r}'
-        elif self.new_file == '/dev/null':
-            f_repr = f'delete {self.old_file!r}'
+            f_repr = display_old_file
+        elif self.old_file is None:
+            f_repr = f'create {display_new_file}'
+        elif self.new_file is None:
+            f_repr = f'delete {display_old_file}'
         else:
-            f_repr = f'rename {self.old_file!r} to {self.new_file!r}'
+            f_repr = f'rename {display_old_file} to {display_new_file}'
 
         return f'<Hunk {f_repr} @@ -{self.old_start} +{self.new_start}>'
 

@@ -7,6 +7,9 @@ from .git import Hunk, DiffLineType
 from .errors import Fatal
 
 
+__all__ = ('FileDiffSummary', 'parse_diff_hunks', 'parse_diff_tree_summary')
+
+
 DIFF_HEADER = re.compile(rb'^diff --git a/.* b/.*')
 DIFF_FSTAT = re.compile(rb'^(index|similarity index|rename|deleted file|new file) .*')
 DIFF_MODE = re.compile(rb'^(old|new) mode .*')
@@ -35,7 +38,25 @@ class DiffParseState(Enum):
     InHunk = 2
 
 
-DIFF_PARSE_INVALID = (DiffParseState.Invalid, None)
+class DiffParseResult:
+    def __init__(self, state, attrs, hunk=None):
+        self.state = state
+        self.attrs = attrs
+        self.hunk = hunk
+
+    @staticmethod
+    def for_diff_header():
+        return DiffParseResult(
+            DiffParseState.DiffHeader,
+            NS(old_file=None, old_file_seen=False, new_file=None, new_file_seen=False),
+        )
+
+    def with_hunk(self, hunk):
+        return DiffParseResult(self.state, self.attrs, hunk)
+
+
+DIFF_PARSE_INITIAL = DiffParseResult(DiffParseState.Initial, None)
+DIFF_PARSE_INVALID = DiffParseResult(DiffParseState.Invalid, None)
 
 
 def parse_diff_hunks(diff):
@@ -45,40 +66,39 @@ def parse_diff_hunks(diff):
 class DiffParser:
     @classmethod
     def parse_diff_hunks(cls, diff):
-        state = DiffParseState.Initial
-        attrs = None
+        res = DIFF_PARSE_INITIAL
 
         # Don't use splitlines; git can put a CR in the middle of a
         # diff line; see e.g. the history of t/t0022-crlf-rename.sh
         # in the git repo
         lines = diff.split(b'\n')
         for line_index, line in enumerate(lines):
-            output = cls.handle_line_parsing(state, attrs, line)
-            if len(output) == 2:
-                state, attrs = output
-                hunk = None
-            elif len(output) == 3:
-                state, attrs, hunk = output
-            else:
-                raise ValueError(repr(output))
+            res = cls.handle_line_parsing(res.state, res.attrs, line)
 
-            if state == DiffParseState.Invalid:
+            if res.state == DiffParseState.Invalid:
                 raise Fatal(
                     f'unexpected diff content at line {line_index + 1}',
                     extended=build_context_lines(lines, line_index),
                 )
 
-            if hunk is not None:
-                yield hunk
+            if res.hunk is not None:
+                yield res.hunk
 
-        if state not in [DiffParseState.Initial, DiffParseState.InHunk]:
+        if res.state not in [DiffParseState.Initial, DiffParseState.InHunk]:
             raise Fatal(
                 'unexpected end of diff',
                 extended=build_context_lines(lines, len(lines)),
             )
 
-        if state == DiffParseState.InHunk:
-            yield Hunk(**attrs.__dict__)  # pylint: disable=missing-kwoa
+        # If the diff is non-empty and nothing could be parsed successfully, throw
+        # an error
+        if res.state == DiffParseState.Initial and any(lines):
+            raise Fatal(
+                'unable to locate diff content', extended=build_context_lines(lines, 0)
+            )
+
+        if res.state == DiffParseState.InHunk:
+            yield Hunk(**res.attrs.__dict__)  # pylint: disable=missing-kwoa
 
     handlers = {}
 
@@ -94,34 +114,37 @@ class DiffParser:
     @classmethod
     def handle_line_parsing(cls, state, attrs, line):
         if state not in cls.handlers:
-            return DIFF_PARSE_INVALID
+            raise ValueError(f'Unknown state {state!r}')  # pragma nocover
 
         handler = cls.handlers[state]
         return handler.__func__(cls, attrs, line)
 
     @_register(DiffParseState.Initial)
     @classmethod
-    def _handle_initial(cls, attrs, line):
+    def _handle_initial(cls, _attrs, line):
         if not DIFF_HEADER.match(line):
             # Ignore initial diffstat output
-            return DiffParseState.Initial, None
+            return DIFF_PARSE_INITIAL
 
-        attrs = NS(old_file=None, new_file=None)
-        return DiffParseState.DiffHeader, attrs
+        return DiffParseResult.for_diff_header()
 
     @_register(DiffParseState.DiffHeader)
     @classmethod
     def _handle_diff_header(cls, attrs, line):
+        # pylint: disable=too-many-return-statements
+
         if DIFF_FSTAT.match(line) or DIFF_MODE.match(line):
             # TODO: Should handle mode
-            return DiffParseState.DiffHeader, attrs
+            return DiffParseResult(DiffParseState.DiffHeader, attrs)
 
         if DIFF_HEADER.match(line) or DIFF_BINARY.match(line):
             # FIXME: Throwing away empty new files and binary files for now
-            attrs = NS(old_file=None, new_file=None)
-            return DiffParseState.DiffHeader, attrs
+            return DiffParseResult.for_diff_header()
 
-        for r, v in [(DIFF_OLD, 'old_file'), (DIFF_NEW, 'new_file')]:
+        for r, v, seen in [
+            (DIFF_OLD, 'old_file', 'old_file_seen'),
+            (DIFF_NEW, 'new_file', 'new_file_seen'),
+        ]:
             match = r.match(line)
             if not match:
                 continue
@@ -129,14 +152,21 @@ class DiffParser:
             if getattr(attrs, v) is not None:
                 return DIFF_PARSE_INVALID
 
-            value = match.group('devnull')
-            if not value:
+            if match.group('devnull'):
+                value = None
+            else:
                 value = match.group('fname')
             setattr(attrs, v, value)
-            return DiffParseState.DiffHeader, attrs
+
+            setattr(attrs, seen, True)
+
+            return DiffParseResult(DiffParseState.DiffHeader, attrs)
 
         match = HUNK_REGEX.match(line)
         if match:
+            if not (attrs.old_file_seen and attrs.new_file_seen):
+                return DIFF_PARSE_INVALID
+
             return cls._handle_diff_hunk_start(line, attrs, match)
 
         return DIFF_PARSE_INVALID
@@ -148,17 +178,16 @@ class DiffParser:
 
         if DIFF_HEADER.match(line):
             hunk = Hunk(**attrs.__dict__)
-            attrs = NS(old_file=None, new_file=None)
-            return DiffParseState.DiffHeader, attrs, hunk
+            return DiffParseResult.for_diff_header().with_hunk(hunk)
 
         match = HUNK_REGEX.match(line)
         if match:
             hunk = Hunk(**attrs.__dict__)
-            return cls._handle_diff_hunk_start(line, attrs, match) + (hunk,)
+            return cls._handle_diff_hunk_start(line, attrs, match).with_hunk(hunk)
 
         if not line:
             # This seems to happen occasionally, not sure when
-            return DiffParseState.InHunk, attrs
+            return DiffParseResult(DiffParseState.InHunk, attrs)
 
         start, remainder = line[:1], line[1:]
         # Handle the "\ No newline at end of file" line
@@ -170,7 +199,7 @@ class DiffParser:
                 # Sanity check
                 return DIFF_PARSE_INVALID
             attrs.ops[-1] = last_op, last_line[:-1]
-            return DiffParseState.InHunk, attrs
+            return DiffParseResult(DiffParseState.InHunk, attrs)
 
         remainder += b'\n'
 
@@ -180,15 +209,12 @@ class DiffParser:
             return DIFF_PARSE_INVALID
 
         attrs.ops.append((line_type, remainder))
-        return DiffParseState.InHunk, attrs
+        return DiffParseResult(DiffParseState.InHunk, attrs)
 
     del _register
 
     @classmethod
     def _handle_diff_hunk_start(cls, _line, attrs, match):
-        if attrs.old_file is None or attrs.new_file is None:
-            return DIFF_PARSE_INVALID
-
         attrs = NS(
             old_file=attrs.old_file,
             new_file=attrs.new_file,
@@ -197,7 +223,7 @@ class DiffParser:
             ops=[],
         )
 
-        return DiffParseState.InHunk, attrs
+        return DiffParseResult(DiffParseState.InHunk, attrs)
 
 
 def parse_diff_tree_summary(diff_tree_lines):
