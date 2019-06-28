@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set
 
-from .git import call_git
+from .git import OID, call_git
 
 
 class CommitGraph:
     @classmethod
-    def build_partial(cls, head: str, roots: List[str]) -> CommitGraph:
+    def build_partial(cls, head: OID, roots: List[OID]) -> CommitGraph:
         """Build the commit graph from the head ref to the root refs
 
         This is implemented by call `git rev-list head ^root` for each root;
@@ -26,23 +26,25 @@ class CommitGraph:
         return graph
 
     def __init__(self) -> None:
-        self.child_to_parents: Dict[str, List[str]] = {}
+        self.child_to_parents: Dict[OID, List[OID]] = {}
 
     def __contains__(self, commit_oid: Any) -> bool:
         return commit_oid in self.child_to_parents
 
-    def get_parents(self, commit_oid: str) -> List[str]:
+    def get_parents(self, commit_oid: OID) -> List[OID]:
         return self.child_to_parents[commit_oid]
 
-    def add_commits(self, commits: List[str]) -> None:
+    def add_commits(self, commits: List[OID]) -> None:
         """Add the specified commits to the graph"""
-        _, output, _ = call_git('rev-list', '--parents', '--no-walk', *commits, '--')
+        _, output, _ = call_git(
+            'rev-list', '--parents', '--no-walk', *(str(c) for c in commits), '--'
+        )
         self._add_from_rev_list_parents(output)
 
-    def add_path(self, head: str, root: str) -> None:
+    def add_path(self, head: OID, root: OID) -> None:
         """Add all commits on the ancestry path from head to root to the graph"""
         _, output, _ = call_git(
-            'rev-list', '--parents', '--ancestry-path', head, '^' + root, '--'
+            'rev-list', '--parents', '--ancestry-path', str(head), f'^{root}', '--'
         )
         self._add_from_rev_list_parents(output)
 
@@ -52,9 +54,9 @@ class CommitGraph:
                 continue
 
             oids = entry.split()
-            child = oids[0].decode()
+            child = OID(oids[0])
 
-            parents = [p.decode() for p in oids[1:]]
+            parents = [OID(p) for p in oids[1:]]
 
             try:
                 prev = self.child_to_parents[child]
@@ -63,13 +65,13 @@ class CommitGraph:
             else:
                 assert parents == prev
 
-    def reverse_topo_ordering(self, head: str) -> List[str]:
+    def reverse_topo_ordering(self, head: OID) -> List[OID]:
         """Return a reversed topological ordering starting at head
 
         This is a listing of the known ancestors of head such that each commit
         is listed before any of its descendants
         """
-        visited: Set[str] = set()
+        visited: Set[OID] = set()
         ordering = []
         work_stack = [(head, self.child_to_parents[head], False)]
 

@@ -30,7 +30,7 @@ import sys
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
 from .blame import run_blame
-from .git import call_git
+from .git import OID, call_git
 from .amend import AmendmentPlan, AbstractApplyStrategy
 from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
@@ -39,16 +39,16 @@ def suggest_basic(
     paths: Optional[List[str]] = None,
     root_rev: Optional[str] = None,
     is_dry_run: bool = False,
-) -> Tuple[str, str]:
+) -> Tuple[OID, OID]:
     head = resolve_revision('HEAD')
-    root_rev = None if root_rev is None else resolve_revision(root_rev)
+    root_oid = None if root_rev is None else resolve_revision(root_rev)
 
     _, diff, _ = call_git(*build_initial_diff_cmd(paths))
 
     plan = AmendmentPlan(head=head)
 
     for hunk in parse_diff_hunks(diff):
-        for old_range, new_range in hunk.get_edits(old_rev=head, new_rev='0' * 40):
+        for old_range, new_range in hunk.get_edits(old_rev=head, new_rev=OID(0)):
             # Can't handle insert-only edits for now; even using a heuristic
             # like the source of the context lines, there's no guarantee that
             # intervening lines weren't added then deleted around this point.
@@ -57,7 +57,7 @@ def suggest_basic(
             if old_range is None or old_range.extent == 0:
                 continue
 
-            blame_outputs = run_blame(old_range, root_rev=root_rev)
+            blame_outputs = run_blame(old_range, root_rev=root_oid)
 
             if not blame_outputs:
                 continue
@@ -111,7 +111,7 @@ def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
     return cmd
 
 
-def resolve_revision(head: Union[bytes, str]) -> str:
+def resolve_revision(head: Union[bytes, str]) -> OID:
     try:
         _, out, _ = call_git('rev-parse', '--verify', head)
     except Fatal as exc:
@@ -120,4 +120,4 @@ def resolve_revision(head: Union[bytes, str]) -> str:
             returncode=exc.returncode,
             extended=exc.extended,
         )
-    return out.strip().decode()
+    return OID(out.strip())

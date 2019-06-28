@@ -10,6 +10,7 @@ import os
 
 from .amend import AmendedBlob, AbstractApplyStrategy
 from .git import (
+    OID,
     CommitListingEntry,
     TreeListingEntry,
     call_git,
@@ -23,31 +24,31 @@ class DummyApplyStrategy(AbstractApplyStrategy):
     """Simply return the original OIDs"""
 
     def write_commit(
-        self, commit_info: CommitListingEntry, tree: str, new_parents: List[str]
-    ) -> str:
-        return f'{commit_info.oid}/fake-amended'
+        self, commit_info: CommitListingEntry, tree: OID, new_parents: List[OID]
+    ) -> OID:
+        return OID(commit_info.commit_oid.numeric + 1)
 
     def write_tree(
         self,
         commit_info: CommitListingEntry,
         amended_blobs_with_oids: List[AmendedBlob],
-    ) -> str:
-        return f'{commit_info.tree_oid}/fake-amended'
+    ) -> OID:
+        return OID(commit_info.tree_oid.numeric + 1)
 
-    def write_blob(self, amended_blob: AmendedBlob) -> str:
-        return f'{amended_blob.oid}/fake-amended'
+    def write_blob(self, amended_blob: AmendedBlob) -> OID:
+        return OID(amended_blob.oid.numeric + 1)
 
 
 class GitExecutableApplyStrategy(AbstractApplyStrategy):
     """Write the commits by calling out to the git executable"""
 
     def write_commit(
-        self, commit_info: CommitListingEntry, tree: str, new_parents: List[str]
-    ) -> str:
+        self, commit_info: CommitListingEntry, tree: OID, new_parents: List[OID]
+    ) -> OID:
         parent_args = []
         for new_parent in new_parents:
             parent_args.append('-p')
-            parent_args.append(new_parent)
+            parent_args.append(str(new_parent))
 
         _, out, _ = call_git(
             'commit-tree',
@@ -61,19 +62,21 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
             ),
         )
 
-        print('-> new commit', out.decode().strip())
+        commit_oid = OID(out.strip())
 
-        return out.decode().strip()
+        print('-> new commit', commit_oid)
+
+        return commit_oid
 
     def write_tree(
         self,
         commit_info: CommitListingEntry,
         amended_blobs_with_oids: List[AmendedBlob],
-    ) -> str:
+    ) -> OID:
         print(
             'amended tree:',
             ' '.join(
-                b.file.decode(errors='replace') + f'={cast(str, b.amended_oid)[:10]}'
+                b.file.decode(errors='replace') + f'={cast(OID, b.amended_oid).short()}'
                 for b in amended_blobs_with_oids
             ),
         )
@@ -81,7 +84,7 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
         if not amended_blobs_with_oids:
             return commit_info.tree_oid
 
-        new_blobs = {b.file: cast(str, b.amended_oid) for b in amended_blobs_with_oids}
+        new_blobs = {b.file: cast(OID, b.amended_oid) for b in amended_blobs_with_oids}
 
         dir_set = set()
         for path in new_blobs:
@@ -99,7 +102,7 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
         for subdir in dirs:
             entries = []
-            for entry in ls_tree(commit_info.oid, '--', subdir + b'/'):
+            for entry in ls_tree(commit_info.commit_oid, '--', subdir + b'/'):
                 updated_entry_oid = new_blobs.get(entry.path, entry.oid)
                 entries.append(
                     TreeListingEntry(
@@ -114,10 +117,10 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
         return new_blobs[b'.']
 
-    def write_blob(self, amended_blob: AmendedBlob) -> str:
+    def write_blob(self, amended_blob: AmendedBlob) -> OID:
         print(
             'write blob:',
-            amended_blob.commit[:10],
+            amended_blob.commit.short(),
             amended_blob.file.decode(errors='replace'),
         )
 
@@ -127,4 +130,4 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
             out: bytes = proc.stdout.read()
 
-        return out.decode().strip()
+        return OID(out.strip())

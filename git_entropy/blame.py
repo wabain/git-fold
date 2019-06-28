@@ -4,7 +4,7 @@ from typing import Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
 
 import itertools
 
-from .git import call_git, IndexedRange
+from .git import OID, call_git, IndexedRange
 
 
 class BlameCommitProperties(NamedTuple):
@@ -13,7 +13,7 @@ class BlameCommitProperties(NamedTuple):
 
 
 class BlameLineProperties(NamedTuple):
-    rev: str
+    rev: OID
     filename: bytes
     is_boundary: bool
     old_line: int
@@ -22,13 +22,13 @@ class BlameLineProperties(NamedTuple):
 
 
 def run_blame(
-    indexed_range: IndexedRange, root_rev: Optional[str] = None
+    indexed_range: IndexedRange, root_rev: Optional[OID] = None
 ) -> List[Tuple[IndexedRange, IndexedRange]]:
     if indexed_range.extent == 0:
         return []
 
     if root_rev is None:
-        revision_range = indexed_range.rev
+        revision_range = str(indexed_range.rev)
     else:
         revision_range = f'{root_rev}..{indexed_range.rev}'
 
@@ -98,7 +98,7 @@ def get_blame_transforms(blame_lines: List[bytes]) -> Iterator[BlameLineProperti
     given source commit.
     """
     # Properties for lines originated in a particular commit
-    commit_properties: Dict[str, BlameCommitProperties] = {}
+    commit_properties: Dict[OID, BlameCommitProperties] = {}
 
     idx = 0
     line_count = len(blame_lines)
@@ -112,7 +112,7 @@ def get_blame_transforms(blame_lines: List[bytes]) -> Iterator[BlameLineProperti
         #
         # TODO: Determine if that's exactly what's happening or if it's more
         # complicated. It's probably correct to ignore these entries regardless.
-        if all(c == '0' for c in rev):
+        if not rev:
             continue
 
         yield BlameLineProperties(
@@ -128,10 +128,10 @@ def get_blame_transforms(blame_lines: List[bytes]) -> Iterator[BlameLineProperti
 def parse_block(
     blame_lines: List[bytes],
     idx: int,
-    commit_properties: Dict[str, BlameCommitProperties],
+    commit_properties: Dict[OID, BlameCommitProperties],
 ) -> Tuple[
     int,  # idx
-    str,  # rev
+    OID,  # rev
     BlameCommitProperties,
     int,  # old line
     int,  # new line
@@ -184,7 +184,7 @@ def parse_block(
     return idx, rev, props, old_line, new_line, starts_seq
 
 
-def as_header(parts: List[bytes]) -> Optional[Tuple[str, int, int, bool]]:
+def as_header(parts: List[bytes]) -> Optional[Tuple[OID, int, int, bool]]:
     """Try to parse blame line into a tuple (oid, old_lineno, new_lineno, starts_seq)"""
     # Line in format <HASH> <OLD-LINENO> <NEW-LINENO> [COUNT]
     if not (
@@ -194,7 +194,7 @@ def as_header(parts: List[bytes]) -> Optional[Tuple[str, int, int, bool]]:
     ):
         return None
 
-    return parts[0].decode(), int(parts[1]), int(parts[2]), len(parts) == 4
+    return OID(parts[0]), int(parts[1]), int(parts[2]), len(parts) == 4
 
 
 def as_filename(parts: List[bytes]) -> Optional[bytes]:

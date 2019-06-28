@@ -5,7 +5,7 @@ from typing import List, Optional
 from pprint import pformat
 from unittest import TestCase
 
-from .git import Hunk, DiffLineType
+from .git import OID, Hunk, DiffLineType
 from .errors import Fatal
 from .diff_parser import FileDiffSummary, parse_diff_hunks, parse_diff_tree_summary
 
@@ -151,8 +151,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='100755',
         new_mode='100755',
-        old_oid='6041d9c9bd255c62d1595b90aee27026a103771b',
-        new_oid='3649362affc209c1663c6c42e6f6c497b1395011',
+        old_oid=OID('6041d9c9bd255c62d1595b90aee27026a103771b'),
+        new_oid=OID('3649362affc209c1663c6c42e6f6c497b1395011'),
         delta_type='R',
         similarity=91,
         old_path=b'bin/deploy.sh',
@@ -161,8 +161,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='100644',
         new_mode='100644',
-        old_oid='0fb25ba9892e0f186e7534441b81ff977c7ec349',
-        new_oid='c5cfa2405dff2d44998f8c682df20bc89b4ec1f2',
+        old_oid=OID('0fb25ba9892e0f186e7534441b81ff977c7ec349'),
+        new_oid=OID('c5cfa2405dff2d44998f8c682df20bc89b4ec1f2'),
         delta_type='M',
         similarity=None,
         old_path=b'content/index.html',
@@ -171,8 +171,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='100644',
         new_mode='100644',
-        old_oid='019a95298b6eb865e11958ac2f1a24ced08d15c5',
-        new_oid='e318a830d437fd87facf5f31052252fa94ff39e0',
+        old_oid=OID('019a95298b6eb865e11958ac2f1a24ced08d15c5'),
+        new_oid=OID('e318a830d437fd87facf5f31052252fa94ff39e0'),
         delta_type='M',
         similarity=None,
         old_path=b'package.json',
@@ -181,8 +181,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='000000',
         new_mode='100644',
-        old_oid='0000000000000000000000000000000000000000',
-        new_oid='a81d9b6ffd480c64c64aef42af665d58eea4fe61',
+        old_oid=OID('0000000000000000000000000000000000000000'),
+        new_oid=OID('a81d9b6ffd480c64c64aef42af665d58eea4fe61'),
         delta_type='A',
         similarity=None,
         old_path=None,
@@ -191,8 +191,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='000000',
         new_mode='100644',
-        old_oid='0000000000000000000000000000000000000000',
-        new_oid='c03fc19924949e77ca8e04f7b8a71e1b0766c87e',
+        old_oid=OID('0000000000000000000000000000000000000000'),
+        new_oid=OID('c03fc19924949e77ca8e04f7b8a71e1b0766c87e'),
         delta_type='A',
         similarity=None,
         old_path=None,
@@ -201,8 +201,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='100644',
         new_mode='000000',
-        old_oid='96e3f21b8a127104638336622185c748f52eb478',
-        new_oid='0000000000000000000000000000000000000000',
+        old_oid=OID('96e3f21b8a127104638336622185c748f52eb478'),
+        new_oid=OID('0000000000000000000000000000000000000000'),
         delta_type='D',
         similarity=None,
         old_path=b'src/scss/_header.scss',
@@ -211,8 +211,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='000000',
         new_mode='100644',
-        old_oid='0000000000000000000000000000000000000000',
-        new_oid='6cbfa9da41a631f2ada656dc98b029596593d02c',
+        old_oid=OID('0000000000000000000000000000000000000000'),
+        new_oid=OID('6cbfa9da41a631f2ada656dc98b029596593d02c'),
         delta_type='A',
         similarity=None,
         old_path=None,
@@ -221,8 +221,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='000000',
         new_mode='100644',
-        old_oid='0000000000000000000000000000000000000000',
-        new_oid='33ad7659450bba4f89ed2a258a7db3db91616d0f',
+        old_oid=OID('0000000000000000000000000000000000000000'),
+        new_oid=OID('33ad7659450bba4f89ed2a258a7db3db91616d0f'),
         delta_type='A',
         similarity=None,
         old_path=None,
@@ -231,8 +231,8 @@ EXPECTED_BASIC_TREE_SUMMARY = [
     FileDiffSummary(
         old_mode='000000',
         new_mode='100644',
-        old_oid='0000000000000000000000000000000000000000',
-        new_oid='cbee3503a423cf654c414967cb1662e167f49efb',
+        old_oid=OID('0000000000000000000000000000000000000000'),
+        new_oid=OID('cbee3503a423cf654c414967cb1662e167f49efb'),
         delta_type='A',
         similarity=None,
         old_path=None,

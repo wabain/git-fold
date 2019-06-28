@@ -17,7 +17,7 @@ import re
 from enum import Enum
 from types import SimpleNamespace as NS
 
-from .git import Hunk, DiffLineType
+from .git import OID, Hunk, DiffLineType
 from .errors import Fatal
 
 
@@ -43,8 +43,8 @@ DIFF_TREE_FILE_RENAME = re.compile(
 class FileDiffSummary(NamedTuple):
     old_mode: str
     new_mode: str
-    old_oid: str
-    new_oid: str
+    old_oid: OID
+    new_oid: OID
     delta_type: str
     similarity: Optional[int]
     old_path: Optional[bytes]
@@ -268,13 +268,14 @@ def parse_diff_tree_summary(diff_tree_lines: bytes) -> List[FileDiffSummary]:
         if match:
             old_mode = match.group(1).decode()
             new_mode = match.group(2).decode()
-            old_oid = match.group(3).decode()
-            new_oid = match.group(4).decode()
+            old_oid = OID(match.group(3))
+            new_oid = OID(match.group(4))
             delta_type = match.group(5).decode()
             new_path: Optional[bytes] = match.group(6)
 
-            old_path = None if all(n == '0' for n in old_oid) else new_path
-            if all(n == '0' for n in new_oid):
+            old_path = new_path if old_oid else None
+
+            if not new_oid:
                 new_path = None
 
             similarity = None
@@ -287,8 +288,8 @@ def parse_diff_tree_summary(diff_tree_lines: bytes) -> List[FileDiffSummary]:
                 )
             old_mode = match.group(1).decode()
             new_mode = match.group(2).decode()
-            old_oid = match.group(3).decode()
-            new_oid = match.group(4).decode()
+            old_oid = OID(match.group(3))
+            new_oid = OID(match.group(4))
             similarity = int(match.group(5))
             old_path = match.group(6)
             new_path = match.group(7)

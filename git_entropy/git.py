@@ -22,6 +22,45 @@ from contextlib import contextmanager
 from .errors import Fatal
 
 
+OID_MAX_VALUE = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+
+
+class OID:
+    def __init__(self, oid: Union[int, str, bytes]):
+        if isinstance(oid, int):
+            if not (0 <= oid <= OID_MAX_VALUE):
+                raise ValueError(f'Invalid OID {oid:x}')
+
+            self.numeric = oid
+        else:
+            try:
+                self.numeric = int(oid, 16)
+            except ValueError as exc:
+                raise ValueError(f'Invalid OID {oid!r}') from exc
+
+    def short(self) -> str:
+        return str(self)[:10]
+
+    def __eq__(self, other: Any) -> bool:
+        return isinstance(other, OID) and other.numeric == self.numeric
+
+    def __hash__(self) -> int:
+        return self.numeric
+
+    def __bool__(self) -> bool:
+        return bool(self.numeric)
+
+    def __str__(self) -> str:
+        return f'{self.numeric:040x}'
+
+    def __bytes__(self) -> bytes:
+        return str(self).encode()
+
+    def __repr__(self) -> str:
+        cls = type(self)
+        return f'{cls.__name__}({str(self)!r})'
+
+
 class FileLineMapping(NamedTuple):
     old_start: int
     old_extent: int
@@ -32,14 +71,14 @@ class FileLineMapping(NamedTuple):
 class TreeListingEntry(NamedTuple):
     mode: str
     obj_type: str
-    oid: str
+    oid: OID
     path: bytes
 
 
 class CommitListingEntry(NamedTuple):
-    oid: str
-    tree_oid: str
-    parents: List[str]
+    commit_oid: OID
+    tree_oid: OID
+    parents: List[OID]
     a_name: bytes
     a_email: bytes
     a_date: str
@@ -56,7 +95,7 @@ class CommitListingEntry(NamedTuple):
 
     def oneline(self) -> str:
         summary = self.summary().decode(errors='replace')
-        return f'{self.oid[:10]} {summary}'
+        return f'{self.commit_oid.short()} {summary}'
 
 
 class DiffLineType(Enum):
@@ -66,26 +105,26 @@ class DiffLineType(Enum):
 
 
 class IndexedRange:
-    def __init__(self, rev: str, file: bytes, start: int, extent: int):
+    def __init__(self, rev: OID, file: bytes, start: int, extent: int):
         self.rev = rev
         self.file = file
         self.start = start
         self.extent = extent
-        self._oid: Optional[str] = None
+        self._blob_oid: Optional[OID] = None
 
-    def oid(self) -> str:
-        if self._oid is None:
+    def blob_oid(self) -> OID:
+        if self._blob_oid is None:
             for entry in ls_tree(self.rev, '--', self.file):
                 if entry.obj_type != 'blob':
                     # TODO: sanity check; maybe some non-blobs are okay
                     raise ValueError(
                         f'expected {self.file} at {self.rev} to be blob; got {entry.obj_type!r}'
                     )
-                self._oid = entry.oid
+                self._blob_oid = entry.oid
                 break
             else:
                 raise ValueError(f'No listing for {self.file} at {self.rev}')
-        return self._oid
+        return self._blob_oid
 
     @property
     def formatted_range(self) -> str:
@@ -117,7 +156,7 @@ class Hunk:
         self.new_start = new_start
         self.ops = ops
 
-    def old_range(self, rev: str) -> Optional[IndexedRange]:
+    def old_range(self, rev: OID) -> Optional[IndexedRange]:
         extent = sum(1 for (line_type, _) in self.ops if line_type != DiffLineType.Add)
 
         if self.old_file is None:
@@ -128,7 +167,7 @@ class Hunk:
         )
 
     def get_edits(
-        self, old_rev: str, new_rev: str
+        self, old_rev: OID, new_rev: OID
     ) -> Iterator[Tuple[Optional[IndexedRange], Optional[IndexedRange]]]:
         """Yield tuples (old_range, new_range) indicating the edits needed"""
         for mapping in self.map_lines():
@@ -233,27 +272,27 @@ class Hunk:
         return f'<Hunk {f_repr} @@ -{self.old_start} +{self.new_start}>'
 
 
-def ls_tree(*args: Union[bytes, str]) -> Iterator[TreeListingEntry]:
+def ls_tree(*args: Union[bytes, str, OID]) -> Iterator[TreeListingEntry]:
     _, out, _ = call_git('ls-tree', *args)
     for line in out.splitlines():
         mode, obj_type, oid, path = line.split(maxsplit=3)
 
         yield TreeListingEntry(
-            mode=mode.decode(), obj_type=obj_type.decode(), oid=oid.decode(), path=path
+            mode=mode.decode(), obj_type=obj_type.decode(), oid=OID(oid), path=path
         )
 
 
-def mk_tree(entries: Iterable[TreeListingEntry]) -> str:
+def mk_tree(entries: Iterable[TreeListingEntry]) -> OID:
     git_input = b'\n'.join(
         f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
 
     _, out, _ = call_git('mktree', input=git_input)
 
-    return out.decode().strip()
+    return OID(out.strip())
 
 
-def cat_commit(rev: str) -> CommitListingEntry:
+def cat_commit(rev: OID) -> CommitListingEntry:
     fields = [
         '%H',  # hash
         '%T',  # tree
@@ -273,7 +312,7 @@ def cat_commit(rev: str) -> CommitListingEntry:
 
     (
         _,
-        oid,
+        commit_oid,
         tree_oid,
         parents,
         a_name,
@@ -286,9 +325,9 @@ def cat_commit(rev: str) -> CommitListingEntry:
     ) = lines
 
     return CommitListingEntry(
-        oid=oid.decode(),
-        tree_oid=tree_oid.decode(),
-        parents=parents.decode().split(),
+        commit_oid=OID(commit_oid),
+        tree_oid=OID(tree_oid),
+        parents=[OID(p) for p in parents.split()],
         a_name=a_name,
         a_email=a_email,
         a_date=a_date.decode(),
@@ -303,7 +342,7 @@ Environ = Dict[str, Union[bytes, str]]
 
 
 def call_git(
-    *args: Union[bytes, str],
+    *args: Union[bytes, str, OID],
     must_succeed: bool = True,
     input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
     env: Optional[Environ] = None,
@@ -315,7 +354,7 @@ def call_git(
 
 
 def call_git_no_capture(
-    *args: Union[bytes, str],
+    *args: Union[bytes, str, OID],
     must_succeed: bool = True,
     input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
     env: Optional[Environ] = None,
@@ -327,14 +366,14 @@ def call_git_no_capture(
 
 
 def _call_git_internal(
-    *args: Union[bytes, str],
+    *args: Union[bytes, str, OID],
     must_succeed: bool = True,
     input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
     env: Optional[Environ] = None,
     capture_output: bool = True,
 ) -> Tuple[int, Optional[bytes], Optional[bytes]]:
     command: List[Union[bytes, str]] = ['git']
-    command.extend(args)
+    command.extend(str(a) if isinstance(a, OID) else a for a in args)
 
     if env is not None:
         override_env = env
@@ -358,10 +397,12 @@ def _call_git_internal(
 
 @contextmanager
 def call_git_async(
-    *args: Union[bytes, str], must_succeed: bool = True, env: Optional[Environ] = None
+    *args: Union[bytes, str, OID],
+    must_succeed: bool = True,
+    env: Optional[Environ] = None,
 ) -> Iterator[Popen]:
     cmd: List[Union[bytes, str]] = ['git']
-    cmd.extend(args)
+    cmd.extend(str(a) if isinstance(a, OID) else a for a in args)
 
     if env is not None:
         override_env = env
