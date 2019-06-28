@@ -7,7 +7,7 @@ creating revisions to the log without affecting the working directory.
 from __future__ import annotations
 
 import typing
-from typing import cast, Dict, Iterator, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import Dict, Iterator, List, NamedTuple, Optional, Set, Tuple, Union
 
 import bisect
 from abc import ABC, abstractmethod
@@ -246,7 +246,6 @@ class AmendmentPlan:
         _, diff_tree, _ = call_git(
             'diff-tree', '-r', '--find-renames', old_parent_oid, commit_info.oid
         )
-        diff_tree = cast(bytes, diff_tree)
         diffed = {
             entry.old_path: entry
             for entry in parse_diff_tree_summary(diff_tree)
@@ -267,7 +266,6 @@ class AmendmentPlan:
             _, diff_output, _ = call_git(
                 'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
             )
-            diff_output = cast(bytes, diff_output)
 
             parent_changes = parent_amendments[entry.old_path][old_parent_oid]
             adjusted_changes = parent_changes.adjusted_by_diff(
@@ -412,7 +410,6 @@ class AmendedBlob:
         # TODO: Stream instead of buffering in memory
         file_rev = f'{self.commit}:'.encode() + self.file
         _, out, _ = call_git('cat-file', '-p', file_rev)
-        out = cast(bytes, out)
 
         amend_iter = iter(self.amendments)
         amend = next(amend_iter, None)

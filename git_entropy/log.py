@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast, Any, Dict, List, Set
+from typing import Any, Dict, List, Set
 
 from .git import call_git
 
@@ -37,7 +37,6 @@ class CommitGraph:
     def add_commits(self, commits: List[str]) -> None:
         """Add the specified commits to the graph"""
         _, output, _ = call_git('rev-list', '--parents', '--no-walk', *commits, '--')
-        output = cast(bytes, output)
         self._add_from_rev_list_parents(output)
 
     def add_path(self, head: str, root: str) -> None:
@@ -45,7 +44,6 @@ class CommitGraph:
         _, output, _ = call_git(
             'rev-list', '--parents', '--ancestry-path', head, '^' + root, '--'
         )
-        output = cast(bytes, output)
         self._add_from_rev_list_parents(output)
 
     def _add_from_rev_list_parents(self, output: bytes) -> None:

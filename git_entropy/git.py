@@ -235,7 +235,6 @@ class Hunk:
 
 def ls_tree(*args: Union[bytes, str]) -> Iterator[TreeListingEntry]:
     _, out, _ = call_git('ls-tree', *args)
-    out = cast(bytes, out)
     for line in out.splitlines():
         mode, obj_type, oid, path = line.split(maxsplit=3)
 
@@ -250,7 +249,6 @@ def mk_tree(entries: Iterable[TreeListingEntry]) -> str:
     )
 
     _, out, _ = call_git('mktree', input=git_input)
-    out = cast(bytes, out)
 
     return out.decode().strip()
 
@@ -271,7 +269,6 @@ def cat_commit(rev: str) -> CommitListingEntry:
     _, out, _ = call_git(
         'rev-list', '--max-count=1', '--format=' + '%n'.join(fields), '--date=raw', rev
     )
-    out = cast(bytes, out)
     lines = out.split(b'\n', maxsplit=len(fields))
 
     (
@@ -306,6 +303,30 @@ Environ = Dict[str, Union[bytes, str]]
 
 
 def call_git(
+    *args: Union[bytes, str],
+    must_succeed: bool = True,
+    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
+    env: Optional[Environ] = None,
+) -> Tuple[int, bytes, bytes]:
+    code, out, err = _call_git_internal(
+        *args, must_succeed=must_succeed, input=input, env=env, capture_output=True
+    )
+    return code, cast(bytes, out), cast(bytes, err)
+
+
+def call_git_no_capture(
+    *args: Union[bytes, str],
+    must_succeed: bool = True,
+    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
+    env: Optional[Environ] = None,
+) -> int:
+    code, _, _ = _call_git_internal(
+        *args, must_succeed=must_succeed, input=input, env=env, capture_output=False
+    )
+    return code
+
+
+def _call_git_internal(
     *args: Union[bytes, str],
     must_succeed: bool = True,
     input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin

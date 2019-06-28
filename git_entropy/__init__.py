@@ -44,7 +44,6 @@ def suggest_basic(
     root_rev = None if root_rev is None else resolve_revision(root_rev)
 
     _, diff, _ = call_git(*build_initial_diff_cmd(paths))
-    diff = cast(bytes, diff)
 
     plan = AmendmentPlan(head=head)
 
@@ -115,7 +114,6 @@ def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
 def resolve_revision(head: Union[bytes, str]) -> str:
     try:
         _, out, _ = call_git('rev-parse', '--verify', head)
-        out = cast(bytes, out)
     except Fatal as exc:
         raise Fatal(
             f'invalid revision {head!r}',

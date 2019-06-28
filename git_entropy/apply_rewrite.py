@@ -60,7 +60,6 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
                 GIT_AUTHOR_DATE=commit_info.a_date,
             ),
         )
-        out = cast(bytes, out)
 
         print('-> new commit', out.decode().strip())
 

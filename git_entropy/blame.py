@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast, Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
+from typing import Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
 
 import itertools
 
@@ -40,7 +40,6 @@ def run_blame(
         '--',
         indexed_range.file,
     )
-    out = cast(bytes, out)
     return parse_blame(
         indexed_range, out.split(b'\n'), include_boundary=root_rev is None
     )

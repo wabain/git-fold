@@ -4,7 +4,7 @@ import sys
 import argparse
 
 from . import suggest_basic
-from .git import call_git
+from .git import call_git, call_git_no_capture
 from .errors import Fatal
 
 
@@ -38,8 +38,8 @@ def main() -> None:
         return
 
     # TODO: Emulate the relevant pager, colorization, display option logic here
-    call_git('range-diff', f'{old_head}...{new_head}', capture_output=False)
-    call_git('diff', '--staged', new_head, capture_output=False)
+    call_git_no_capture('range-diff', f'{old_head}...{new_head}')
+    call_git_no_capture('diff', '--staged', new_head)
 
     if not args.update:
         return
