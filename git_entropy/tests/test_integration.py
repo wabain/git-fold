@@ -1,10 +1,14 @@
+from __future__ import annotations
+
+from typing import Any, Iterator, List, Union
+
 import os
 import shlex
 from contextlib import contextmanager
 from unittest import TestCase
 from tempfile import TemporaryDirectory
 from textwrap import dedent
-from subprocess import run
+from subprocess import run, CompletedProcess
 
 from .. import suggest_basic
 
@@ -13,7 +17,7 @@ class SimpleIntegrationTest(TestCase):
 
     maxDiff = None
 
-    def test_basic_merge_case(self):
+    def test_basic_merge_case(self) -> None:
         env_overrides = {
             'GIT_CONFIG_NOSYSTEM': '1',
             'HOME': '/var/empty/doesntexist',
@@ -105,7 +109,7 @@ class SimpleIntegrationTest(TestCase):
 
 
 @contextmanager
-def change_dir(cwd):
+def change_dir(cwd: str) -> Iterator[None]:
     old_cwd = os.getcwd()
     try:
         os.chdir(cwd)
@@ -115,7 +119,7 @@ def change_dir(cwd):
 
 
 @contextmanager
-def update_env(**kwargs):
+def update_env(**kwargs: str) -> Iterator[None]:
     old_env = dict(os.environ)
     os.environ.update(kwargs)
     try:
@@ -128,14 +132,14 @@ def update_env(**kwargs):
         os.environ.update(old_env)
 
 
-def test_cmd(cmd, **kwargs):
+def test_cmd(cmd: Union[str, List[str]], **kwargs: Any) -> CompletedProcess:
     if isinstance(cmd, str):
         # test calls don't need to worry much about input validation
         cmd = shlex.split(cmd)
     return run(cmd, check=True, **kwargs)
 
 
-def write_lines(fname, lines):
+def write_lines(fname: str, lines: List[str]) -> None:
     with open(fname, 'w') as target_file:
         for line in lines:
             target_file.write(line)

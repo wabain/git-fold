@@ -1,30 +1,60 @@
+from __future__ import annotations
+
+from typing import (
+    cast,
+    Any,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
+
 import os
 from subprocess import Popen, PIPE, run
 from enum import Enum
-from collections import namedtuple
 from contextlib import contextmanager
 
 from .errors import Fatal
 
 
-FileLineMapping = namedtuple(
-    'FileLineMapping', 'old_start,old_extent,new_start,new_extent'
-)
-TreeListingEntry = namedtuple('TreeListingEntry', 'mode,obj_type,oid,path')
-BaseCommitListingEntry = namedtuple(
-    'BaseCommitListingEntry',
-    'oid,tree_oid,parents,a_name,a_email,a_date,c_name,c_email,c_date,message',
-)
+class FileLineMapping(NamedTuple):
+    old_start: int
+    old_extent: int
+    new_start: int
+    new_extent: int
 
 
-class CommitListingEntry(BaseCommitListingEntry):
-    def summary(self):
+class TreeListingEntry(NamedTuple):
+    mode: str
+    obj_type: str
+    oid: str
+    path: bytes
+
+
+class CommitListingEntry(NamedTuple):
+    oid: str
+    tree_oid: str
+    parents: List[str]
+    a_name: bytes
+    a_email: bytes
+    a_date: str
+    c_name: bytes
+    c_email: bytes
+    c_date: str
+    message: bytes
+
+    def summary(self) -> bytes:
         end = self.message.find(b'\n')
         if end < 0:
             return self.message
         return self.message[:end]
 
-    def oneline(self):
+    def oneline(self) -> str:
         summary = self.summary().decode(errors='replace')
         return f'{self.oid[:10]} {summary}'
 
@@ -36,14 +66,14 @@ class DiffLineType(Enum):
 
 
 class IndexedRange:
-    def __init__(self, rev, file, start, extent):
+    def __init__(self, rev: str, file: bytes, start: int, extent: int):
         self.rev = rev
         self.file = file
         self.start = start
         self.extent = extent
-        self._oid = None
+        self._oid: Optional[str] = None
 
-    def oid(self):
+    def oid(self) -> str:
         if self._oid is None:
             for entry in ls_tree(self.rev, '--', self.file):
                 if entry.obj_type != 'blob':
@@ -58,48 +88,73 @@ class IndexedRange:
         return self._oid
 
     @property
-    def formatted_range(self):
+    def formatted_range(self) -> str:
         return f'{self.start},+{self.extent}'
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f'<IndexedRange {self.rev} {self.file!r} {self.formatted_range}>'
 
 
 class Hunk:
-    def __init__(self, *, old_file, new_file, old_start, new_start, ops):
+    def __init__(
+        self,
+        *,
+        old_file: Optional[bytes],
+        new_file: Optional[bytes],
+        old_start: int,
+        new_start: int,
+        ops: List[Tuple[DiffLineType, bytes]],
+    ):
+        if old_file is None and not all(op_t == DiffLineType.Add for op_t, _ in ops):
+            raise ValueError('non-empty old content but old file missing')
+
+        if new_file is None and not all(op_t == DiffLineType.Remove for op_t, _ in ops):
+            raise ValueError('non-empty new content but new file missing')
+
         self.old_file = old_file
         self.new_file = new_file
         self.old_start = old_start
         self.new_start = new_start
         self.ops = ops
 
-    def old_range(self, rev):
+    def old_range(self, rev: str) -> Optional[IndexedRange]:
         extent = sum(1 for (line_type, _) in self.ops if line_type != DiffLineType.Add)
+
+        if self.old_file is None:
+            return None
 
         return IndexedRange(
             rev=rev, file=self.old_file, start=self.old_start, extent=extent
         )
 
-    def get_edits(self, old_rev, new_rev):
+    def get_edits(
+        self, old_rev: str, new_rev: str
+    ) -> Iterator[Tuple[Optional[IndexedRange], Optional[IndexedRange]]]:
         """Yield tuples (old_range, new_range) indicating the edits needed"""
         for mapping in self.map_lines():
-            old_range = IndexedRange(
-                rev=old_rev,
-                file=self.old_file,
-                start=mapping.old_start,
-                extent=mapping.old_extent,
-            )
+            if self.old_file is None:
+                old_range = None
+            else:
+                old_range = IndexedRange(
+                    rev=old_rev,
+                    file=self.old_file,
+                    start=mapping.old_start,
+                    extent=mapping.old_extent,
+                )
 
-            new_range = IndexedRange(
-                rev=new_rev,
-                file=self.new_file,
-                start=mapping.new_start,
-                extent=mapping.new_extent,
-            )
+            if self.new_file is None:
+                new_range = None
+            else:
+                new_range = IndexedRange(
+                    rev=new_rev,
+                    file=self.new_file,
+                    start=mapping.new_start,
+                    extent=mapping.new_extent,
+                )
 
             yield old_range, new_range
 
-    def map_lines(self):
+    def map_lines(self) -> Iterator[FileLineMapping]:
         """Yield line mappings indicating the edits to apply the hunk"""
         old_line, new_line = self.old_start, self.new_start
         old_mstart, new_mstart = old_line, new_line
@@ -134,7 +189,7 @@ class Hunk:
         if old_extent != 0 or new_extent != 0:
             yield FileLineMapping(old_mstart, old_extent, new_mstart, new_extent)
 
-    def new_range_content(self, start, extent):
+    def new_range_content(self, start: int, extent: int) -> bytes:
         if extent == 0:
             return b''
 
@@ -146,7 +201,7 @@ class Hunk:
 
         return b''.join(combined)
 
-    def __eq__(self, other):
+    def __eq__(self, other: Any) -> bool:
         if not isinstance(other, Hunk):
             return NotImplemented
 
@@ -158,7 +213,7 @@ class Hunk:
             and self.ops == other.ops
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         display_old_file = (
             None if self.old_file is None else self.old_file.decode(errors='replace')
         )
@@ -178,24 +233,29 @@ class Hunk:
         return f'<Hunk {f_repr} @@ -{self.old_start} +{self.new_start}>'
 
 
-def ls_tree(*args):
+def ls_tree(*args: Union[bytes, str]) -> Iterator[TreeListingEntry]:
     _, out, _ = call_git('ls-tree', *args)
+    out = cast(bytes, out)
     for line in out.splitlines():
-        parts = line.split(maxsplit=3)
-        for i in range(3):
-            parts[i] = parts[i].decode()
-        yield TreeListingEntry(*parts)
+        mode, obj_type, oid, path = line.split(maxsplit=3)
+
+        yield TreeListingEntry(
+            mode=mode.decode(), obj_type=obj_type.decode(), oid=oid.decode(), path=path
+        )
 
 
-def mk_tree(entries):
+def mk_tree(entries: Iterable[TreeListingEntry]) -> str:
     git_input = b'\n'.join(
         f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
+
     _, out, _ = call_git('mktree', input=git_input)
+    out = cast(bytes, out)
+
     return out.decode().strip()
 
 
-def cat_commit(rev):
+def cat_commit(rev: str) -> CommitListingEntry:
     fields = [
         '%H',  # hash
         '%T',  # tree
@@ -211,6 +271,7 @@ def cat_commit(rev):
     _, out, _ = call_git(
         'rev-list', '--max-count=1', '--format=' + '%n'.join(fields), '--date=raw', rev
     )
+    out = cast(bytes, out)
     lines = out.split(b'\n', maxsplit=len(fields))
 
     (
@@ -241,23 +302,28 @@ def cat_commit(rev):
     )
 
 
+Environ = Dict[str, Union[bytes, str]]
+
+
 def call_git(
-    *args, must_succeed=True, input=None, env=None, capture_output=True
-):  # pylint: disable=redefined-builtin
-    command = ['git']
+    *args: Union[bytes, str],
+    must_succeed: bool = True,
+    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
+    env: Optional[Environ] = None,
+    capture_output: bool = True,
+) -> Tuple[int, Optional[bytes], Optional[bytes]]:
+    command: List[Union[bytes, str]] = ['git']
     command.extend(args)
 
     if env is not None:
         override_env = env
-        env = dict(os.environ)
+        env = cast(Environ, dict(os.environ))
         env.update(override_env)
 
     outcome = run(command, input=input, env=env, capture_output=capture_output)
 
     if must_succeed and outcome.returncode != 0:
-        display_command = ' '.join(
-            c.decode(errors='replace') if isinstance(c, bytes) else c for c in command
-        )
+        display_command = get_display_command(command)
         raise Fatal(
             f'failed to execute {display_command!r}',
             returncode=outcome.returncode,
@@ -270,13 +336,15 @@ def call_git(
 
 
 @contextmanager
-def call_git_async(*args, must_succeed=True, env=None):
-    cmd = ['git']
+def call_git_async(
+    *args: Union[bytes, str], must_succeed: bool = True, env: Optional[Environ] = None
+) -> Iterator[Popen]:
+    cmd: List[Union[bytes, str]] = ['git']
     cmd.extend(args)
 
     if env is not None:
         override_env = env
-        env = dict(os.environ)
+        env = cast(Environ, dict(os.environ))
         env.update(override_env)
 
     with Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=env) as proc:
@@ -288,9 +356,16 @@ def call_git_async(*args, must_succeed=True, env=None):
             raise
 
         if must_succeed and proc.returncode != 0:
-            display_command = ' '.join(cmd)
+            display_command = get_display_command(cmd)
             raise Fatal(
                 f'failed to execute {display_command!r}',
                 returncode=proc.returncode,
                 extended=proc.stderr.read().decode(errors='replace'),
             )
+
+
+def get_display_command(cmd: Sequence[Union[bytes, str]]) -> str:
+    return ' '.join(
+        c.decode(errors='replace') if isinstance(c, bytes) else c for c in cmd
+    )
+

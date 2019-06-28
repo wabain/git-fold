@@ -1,9 +1,13 @@
+from __future__ import annotations
+
+from typing import cast, Any, Dict, List, Set
+
 from .git import call_git
 
 
 class CommitGraph:
     @classmethod
-    def build_partial(cls, head, roots):
+    def build_partial(cls, head: str, roots: List[str]) -> CommitGraph:
         """Build the commit graph from the head ref to the root refs
 
         This is implemented by call `git rev-list head ^root` for each root;
@@ -21,28 +25,30 @@ class CommitGraph:
         graph.add_commits(roots)
         return graph
 
-    def __init__(self):
-        self.child_to_parents = {}
+    def __init__(self) -> None:
+        self.child_to_parents: Dict[str, List[str]] = {}
 
-    def __contains__(self, commit_oid):
+    def __contains__(self, commit_oid: Any) -> bool:
         return commit_oid in self.child_to_parents
 
-    def get_parents(self, commit_oid):
+    def get_parents(self, commit_oid: str) -> List[str]:
         return self.child_to_parents[commit_oid]
 
-    def add_commits(self, commits):
+    def add_commits(self, commits: List[str]) -> None:
         """Add the specified commits to the graph"""
         _, output, _ = call_git('rev-list', '--parents', '--no-walk', *commits, '--')
+        output = cast(bytes, output)
         self._add_from_rev_list_parents(output)
 
-    def add_path(self, head, root):
+    def add_path(self, head: str, root: str) -> None:
         """Add all commits on the ancestry path from head to root to the graph"""
         _, output, _ = call_git(
             'rev-list', '--parents', '--ancestry-path', head, '^' + root, '--'
         )
+        output = cast(bytes, output)
         self._add_from_rev_list_parents(output)
 
-    def _add_from_rev_list_parents(self, output):
+    def _add_from_rev_list_parents(self, output: bytes) -> None:
         for entry in output.split(b'\n'):
             if not entry:
                 continue
@@ -59,13 +65,13 @@ class CommitGraph:
             else:
                 assert parents == prev
 
-    def reverse_topo_ordering(self, head):
+    def reverse_topo_ordering(self, head: str) -> List[str]:
         """Return a reversed topological ordering starting at head
 
         This is a listing of the known ancestors of head such that each commit
         is listed before any of its descendants
         """
-        visited = set()
+        visited: Set[str] = set()
         ordering = []
         work_stack = [(head, self.child_to_parents[head], False)]
 

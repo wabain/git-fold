@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import sys
 import argparse
 
@@ -6,7 +8,7 @@ from .git import call_git
 from .errors import Fatal
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser('git entropy')
 
     root_opts = parser.add_mutually_exclusive_group(required=True)

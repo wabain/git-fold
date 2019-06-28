@@ -1,16 +1,29 @@
-from collections import namedtuple
+from __future__ import annotations
+
+from typing import cast, Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
+
 import itertools
 
 from .git import call_git, IndexedRange
 
 
-BlameCommitProperties = namedtuple('BlameCommitProperties', 'filename,is_boundary')
-BlameLineProperties = namedtuple(
-    'BlameLineProperties', 'rev,filename,is_boundary,old_line,new_line,starts_seq'
-)
+class BlameCommitProperties(NamedTuple):
+    filename: bytes
+    is_boundary: bool
 
 
-def run_blame(indexed_range, root_rev=None):
+class BlameLineProperties(NamedTuple):
+    rev: str
+    filename: bytes
+    is_boundary: bool
+    old_line: int
+    new_line: int
+    starts_seq: bool
+
+
+def run_blame(
+    indexed_range: IndexedRange, root_rev: Optional[str] = None
+) -> List[Tuple[IndexedRange, IndexedRange]]:
     if indexed_range.extent == 0:
         return []
 
@@ -27,13 +40,16 @@ def run_blame(indexed_range, root_rev=None):
         '--',
         indexed_range.file,
     )
+    out = cast(bytes, out)
     return parse_blame(
         indexed_range, out.split(b'\n'), include_boundary=root_rev is None
     )
 
 
-def parse_blame(src_range, blame_lines, include_boundary):
-    range_mapping = []
+def parse_blame(
+    src_range: IndexedRange, blame_lines: List[bytes], include_boundary: bool
+) -> List[Tuple[IndexedRange, IndexedRange]]:
+    range_mapping: List[Tuple[IndexedRange, IndexedRange]] = []
 
     for transformed_line in get_blame_transforms(blame_lines):
         if (not include_boundary) and transformed_line.is_boundary:
@@ -70,7 +86,7 @@ def parse_blame(src_range, blame_lines, include_boundary):
     return range_mapping
 
 
-def get_blame_transforms(blame_lines):
+def get_blame_transforms(blame_lines: List[bytes]) -> Iterator[BlameLineProperties]:
     """Yield a tuple for each blamed line indicating its source
 
     For our purposes, we interpret the porcelain blame format as follows:
@@ -83,7 +99,7 @@ def get_blame_transforms(blame_lines):
     given source commit.
     """
     # Properties for lines originated in a particular commit
-    commit_properties = {}
+    commit_properties: Dict[str, BlameCommitProperties] = {}
 
     idx = 0
     line_count = len(blame_lines)
@@ -110,7 +126,18 @@ def get_blame_transforms(blame_lines):
         )
 
 
-def parse_block(blame_lines, idx, commit_properties):
+def parse_block(
+    blame_lines: List[bytes],
+    idx: int,
+    commit_properties: Dict[str, BlameCommitProperties],
+) -> Tuple[
+    int,  # idx
+    str,  # rev
+    BlameCommitProperties,
+    int,  # old line
+    int,  # new line
+    bool,  # starts seq
+]:
     header_entry = as_header(blame_lines[idx].split())
     if header_entry is None:
         raise ValueError(
@@ -158,7 +185,7 @@ def parse_block(blame_lines, idx, commit_properties):
     return idx, rev, props, old_line, new_line, starts_seq
 
 
-def as_header(parts):
+def as_header(parts: List[bytes]) -> Optional[Tuple[str, int, int, bool]]:
     """Try to parse blame line into a tuple (oid, old_lineno, new_lineno, starts_seq)"""
     # Line in format <HASH> <OLD-LINENO> <NEW-LINENO> [COUNT]
     if not (
@@ -171,13 +198,13 @@ def as_header(parts):
     return parts[0].decode(), int(parts[1]), int(parts[2]), len(parts) == 4
 
 
-def as_filename(parts):
+def as_filename(parts: List[bytes]) -> Optional[bytes]:
     if len(parts) != 2 or parts[0] != b'filename':
         return None
     return parts[1]
 
 
-def is_int(string, base):
+def is_int(string: Union[bytes, str], base: int) -> bool:
     try:
         int(string, base)
     except ValueError:

@@ -4,25 +4,34 @@ This interface combines the functionality of git amend and git rebase,
 creating revisions to the log without affecting the working directory.
 """
 
-import bisect
-from itertools import chain
-from collections import namedtuple
+from __future__ import annotations
 
-from .git import ls_tree, cat_commit, call_git
+import typing
+from typing import cast, Dict, Iterator, List, NamedTuple, Optional, Set, Tuple, Union
+
+import bisect
+from abc import ABC, abstractmethod
+from itertools import chain
+
+from . import git
+from .git import ls_tree, cat_commit, call_git, IndexedRange
 from .log import CommitGraph
 from .errors import Fatal
 from .diff_parser import parse_diff_hunks, parse_diff_tree_summary
 
 
-AmendmentRecord = namedtuple('AmendmentRecord', 'start,extent,replacement')
+class AmendmentRecord(NamedTuple):
+    start: int
+    extent: int
+    replacement: bytes
 
 
 class AmendmentPlan:
-    def __init__(self, head):
+    def __init__(self, head: str):
         self.head = head
-        self.commits = {}
+        self.commits: Dict[str, Dict[bytes, AmendedBlob]] = {}
 
-    def amend_range(self, indexed_range, new_lines):
+    def amend_range(self, indexed_range: IndexedRange, new_lines: bytes) -> None:
         for_commit = self._for_commit(indexed_range.rev)
         try:
             for_blob = for_commit[indexed_range.file]
@@ -33,7 +42,7 @@ class AmendmentPlan:
             for_commit[indexed_range.file] = for_blob
         for_blob.replace_lines(indexed_range.start, indexed_range.extent, new_lines)
 
-    def _for_commit(self, sha):
+    def _for_commit(self, sha: str) -> Dict[bytes, AmendedBlob]:
         try:
             int(sha, 16)
         except ValueError:
@@ -45,13 +54,13 @@ class AmendmentPlan:
             out = self.commits[sha] = {}
             return out
 
-    def write_commits(self, apply_strategy):
+    def write_commits(self, apply_strategy: AbstractApplyStrategy) -> str:
         commit_graph = CommitGraph.build_partial(
             head=self.head, roots=list(self.commits)
         )
 
         # Map { old_commit: (new_commit, { path: (amended_blob, new_oid) } }
-        amended_commits = {}
+        amended_commits: Dict[str, Tuple[str, Dict[bytes, AmendedBlob]]] = {}
 
         for to_rewrite in commit_graph.reverse_topo_ordering(self.head):
             # FIXME: Might need a more scaleable way to do this? (e.g. batch)
@@ -78,18 +87,21 @@ class AmendmentPlan:
 
         return amended_commits[self.head][0]
 
-    def _get_amended_parents(self, parents, amended_commits):
+    def _get_amended_parents(
+        self,
+        parents: List[str],
+        amended_commits: Dict[str, Tuple[str, Dict[bytes, AmendedBlob]]],
+    ) -> Tuple[List[str], Dict[bytes, Dict[str, AmendedBlob]]]:
         """Return a pair (new_parents, parent_amendments)
 
         The former is an ordered list of the parent OIDs to be used for the
         amended commit. The latter is a dict mapping from the path to a dict
-        from the original commit OID to the amended blob and the new OID for
-        that path.
+        from the original commit OID to the amended blob for that path.
         """
         new_parents = []
 
-        # Map path -> {parent_commit_oid: (amended_blob, new_oid)...}
-        parent_amendments = {}
+        # Map path -> {parent_commit_oid: amended_blob...}
+        parent_amendments: Dict[bytes, Dict[str, AmendedBlob]] = {}
 
         for parent in parents:
             try:
@@ -105,7 +117,13 @@ class AmendmentPlan:
 
         return new_parents, parent_amendments
 
-    def _rewrite_commit(self, apply_strategy, commit_info, new_parents, amendments):
+    def _rewrite_commit(
+        self,
+        apply_strategy: AbstractApplyStrategy,
+        commit_info: git.CommitListingEntry,
+        new_parents: List[str],
+        amendments: Dict[bytes, AmendedBlob],
+    ) -> Tuple[str, List[AmendedBlob]]:
         amended_with_oids = list(self._write_amended_blobs(apply_strategy, amendments))
 
         new_tree_oid = apply_strategy.write_tree(commit_info, amended_with_oids)
@@ -114,7 +132,12 @@ class AmendmentPlan:
 
         return new_oid, amended_with_oids
 
-    def _coalesce_amended_blobs(self, commit_info, new_amendments, parent_amendments):
+    def _coalesce_amended_blobs(
+        self,
+        commit_info: git.CommitListingEntry,
+        new_amendments: Dict[bytes, AmendedBlob],
+        parent_amendments: Dict[bytes, Dict[str, AmendedBlob]],
+    ) -> Dict[bytes, AmendedBlob]:
         need_full_reconcile = set(new_amendments) & set(parent_amendments)
 
         coalesced = {
@@ -163,7 +186,13 @@ class AmendmentPlan:
 
         return coalesced
 
-    def _find_fast_forward_parent(self, path, commit_info, parents, own_blob_oid):
+    def _find_fast_forward_parent(
+        self,
+        path: bytes,
+        commit_info: git.CommitListingEntry,
+        parents: Dict[str, AmendedBlob],
+        own_blob_oid: str,
+    ) -> Optional[AmendedBlob]:
         for parent_blob in parents.values():
             if parent_blob.oid != own_blob_oid:
                 continue
@@ -171,8 +200,13 @@ class AmendmentPlan:
         return None
 
     def _handle_parent_changes_with_diff(
-        self, coalesced, commit_info, new_amendments, parent_amendments, needed_paths
-    ):
+        self,
+        coalesced: Dict[bytes, AmendedBlob],
+        commit_info: git.CommitListingEntry,
+        new_amendments: Dict[bytes, AmendedBlob],
+        parent_amendments: Dict[bytes, Dict[str, AmendedBlob]],
+        needed_paths: Set[bytes],
+    ) -> None:
         """
         Run a diff against each parent to try reconstruct the chain of
         amendments identified by git blame, including renames. Getting
@@ -186,7 +220,7 @@ class AmendmentPlan:
         partially_coalesced = {
             path: blob for path, blob in new_amendments.items() if path in needed_paths
         }
-        handled = set()
+        handled: Set[bytes] = set()
 
         for old_parent_oid in commit_info.parents:
             handled |= self._account_for_diff_against_parent(
@@ -203,15 +237,16 @@ class AmendmentPlan:
 
     def _account_for_diff_against_parent(
         self,
-        partially_coalesced,
-        old_parent_oid,
-        commit_info,
-        parent_amendments,
-        needed_paths,
-    ):
+        partially_coalesced: Dict[bytes, AmendedBlob],
+        old_parent_oid: str,
+        commit_info: git.CommitListingEntry,
+        parent_amendments: Dict[bytes, Dict[str, AmendedBlob]],
+        needed_paths: Set[bytes],
+    ) -> Set[bytes]:
         _, diff_tree, _ = call_git(
             'diff-tree', '-r', '--find-renames', old_parent_oid, commit_info.oid
         )
+        diff_tree = cast(bytes, diff_tree)
         diffed = {
             entry.old_path: entry
             for entry in parse_diff_tree_summary(diff_tree)
@@ -220,6 +255,8 @@ class AmendmentPlan:
         handled = set()
 
         for _, entry in sorted(diffed.items()):
+            assert entry.old_path is not None
+
             # XXX: Wrong; not sure this is an error at all but it's definitely not an error per-parent
             if entry.new_path is None:
                 raise Fatal(
@@ -230,6 +267,7 @@ class AmendmentPlan:
             _, diff_output, _ = call_git(
                 'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
             )
+            diff_output = cast(bytes, diff_output)
 
             parent_changes = parent_amendments[entry.old_path][old_parent_oid]
             adjusted_changes = parent_changes.adjusted_by_diff(
@@ -252,7 +290,11 @@ class AmendmentPlan:
 
         return handled
 
-    def _write_amended_blobs(self, apply_strategy, amended_blobs):
+    def _write_amended_blobs(
+        self,
+        apply_strategy: AbstractApplyStrategy,
+        amended_blobs: Dict[bytes, AmendedBlob],
+    ) -> Iterator[AmendedBlob]:
         for amended_blob in amended_blobs.values():
             if amended_blob.amended_oid is not None:
                 yield amended_blob
@@ -262,14 +304,16 @@ class AmendmentPlan:
 
 
 class AmendedBlob:
-    def __init__(self, commit, file, oid, amended_oid=None):
+    def __init__(
+        self, commit: str, file: bytes, oid: str, amended_oid: Optional[str] = None
+    ):
         self.commit = commit
         self.file = file
         self.oid = oid
         self.amended_oid = amended_oid
-        self.amendments = []
+        self.amendments: List[AmendmentRecord] = []
 
-    def replace_lines(self, start, extent, new_lines):
+    def replace_lines(self, start: int, extent: int, new_lines: bytes) -> None:
         record = AmendmentRecord(start, extent, new_lines)
         index = bisect.bisect_left(self.amendments, record)
 
@@ -289,26 +333,28 @@ class AmendedBlob:
 
         self.amendments.insert(index, record)
 
-    def with_merged_amendments(self, amendments):
+    def with_merged_amendments(self, amendments: List[AmendmentRecord]) -> AmendedBlob:
         copy = AmendedBlob(self.commit, self.file, self.oid, amended_oid=None)
         copy.amendments = list(self.amendments)
         for record in amendments:
             copy.replace_lines(record.start, record.extent, record.replacement)
         return copy
 
-    def with_meta(self, commit, file, oid):
+    def with_meta(self, commit: str, file: bytes, oid: str) -> AmendedBlob:
         adjusted = AmendedBlob(commit, file, oid, amended_oid=self.amended_oid)
         adjusted.amendments.extend(self.amendments)
         return adjusted
 
-    def with_amended_oid(self, amended_oid):
+    def with_amended_oid(self, amended_oid: str) -> AmendedBlob:
         if self.amended_oid is not None:
             raise ValueError(f'Associating amended OID {amended_oid!r} with {self!r}')
         amended = AmendedBlob(self.commit, self.file, self.oid, amended_oid)
         amended.amendments.extend(self.amendments)
         return amended
 
-    def adjusted_by_diff(self, diff_hunks, commit, file, oid):
+    def adjusted_by_diff(
+        self, diff_hunks: Iterator[git.Hunk], commit: str, file: bytes, oid: str
+    ) -> AmendedBlob:
         adjusted = AmendedBlob(commit, file, oid, amended_oid=None)
 
         offset = 0
@@ -326,7 +372,9 @@ class AmendedBlob:
 
         return adjusted
 
-    def _stream_amendments_and_diff_hunks(self, diff_hunks):
+    def _stream_amendments_and_diff_hunks(
+        self, diff_hunks: Iterator[git.Hunk]
+    ) -> Iterator[Union[AmendmentRecord, git.FileLineMapping]]:
         amend_iter = iter(self.amendments)
         line_map_iter = chain.from_iterable(h.map_lines() for h in diff_hunks)
 
@@ -357,13 +405,14 @@ class AmendedBlob:
             yield line_map
             yield from line_map_iter
 
-    def write(self, output):
+    def write(self, output: typing.BinaryIO) -> None:
         if self.amended_oid is not None:
             raise ValueError(f'Writing blob for {self!r}')
 
         # TODO: Stream instead of buffering in memory
         file_rev = f'{self.commit}:'.encode() + self.file
         _, out, _ = call_git('cat-file', '-p', file_rev)
+        out = cast(bytes, out)
 
         amend_iter = iter(self.amendments)
         amend = next(amend_iter, None)
@@ -381,7 +430,7 @@ class AmendedBlob:
 
             output.write(line)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         class_name = type(self).__name__
         file_repr = self.file.decode(errors='replace')
         if self.amended_oid is not None:
@@ -389,3 +438,29 @@ class AmendedBlob:
         else:
             oids = f'from {self.oid[:10]}'
         return f'<{class_name} {self.commit[:10]}:{file_repr}, {oids}>'
+
+
+class AbstractApplyStrategy(ABC):
+    """Interface for strategies used to apply rewrites
+
+    Each write method returns the resulting OID.
+    """
+
+    @abstractmethod
+    def write_commit(
+        self, commit_info: git.CommitListingEntry, tree: str, new_parents: List[str]
+    ) -> str:
+        raise NotImplementedError()
+
+    @abstractmethod
+    def write_tree(
+        self,
+        commit_info: git.CommitListingEntry,
+        amended_blobs_with_oids: List[AmendedBlob],
+    ) -> str:
+        """Recursively rewrite the root tree"""
+        raise NotImplementedError()
+
+    @abstractmethod
+    def write_blob(self, amended_blob: AmendedBlob) -> str:
+        raise NotImplementedError()

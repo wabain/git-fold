@@ -21,21 +21,30 @@ Implementation
 For the first implementation, build on top of git blame.
 """
 
+from __future__ import annotations
+
+from typing import List, Optional, Tuple, Union, cast
+
 import sys
 
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
 from .blame import run_blame
 from .git import call_git
-from .amend import AmendmentPlan
+from .amend import AmendmentPlan, AbstractApplyStrategy
 from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
 
-def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
+def suggest_basic(
+    paths: Optional[List[str]] = None,
+    root_rev: Optional[str] = None,
+    is_dry_run: bool = False,
+) -> Tuple[str, str]:
     head = resolve_revision('HEAD')
     root_rev = None if root_rev is None else resolve_revision(root_rev)
 
     _, diff, _ = call_git(*build_initial_diff_cmd(paths))
+    diff = cast(bytes, diff)
 
     plan = AmendmentPlan(head=head)
 
@@ -46,7 +55,7 @@ def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
             # intervening lines weren't added then deleted around this point.
             #
             # Need to track the lines back via diff
-            if old_range.extent == 0:
+            if old_range is None or old_range.extent == 0:
                 continue
 
             blame_outputs = run_blame(old_range, root_rev=root_rev)
@@ -57,7 +66,7 @@ def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
             if len(blame_outputs) > 1:
                 # Can't handle backporting to multiple commits when there are
                 # new changes to be applied
-                if new_range.extent > 0:
+                if new_range is not None and new_range.extent > 0:
                     continue
 
                 for partial_target_range, _ in blame_outputs:
@@ -66,7 +75,12 @@ def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
                 continue
 
             target_range, _ = blame_outputs[0]
-            new_content = hunk.new_range_content(new_range.start, new_range.extent)
+
+            if new_range is None:
+                new_content = b''
+            else:
+                new_content = hunk.new_range_content(new_range.start, new_range.extent)
+
             plan.amend_range(target_range, new_content)
 
     if not plan.commits:
@@ -75,7 +89,7 @@ def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
     # TODO: Add interactive mode
 
     if is_dry_run:
-        apply_strategy = DummyApplyStrategy()
+        apply_strategy: AbstractApplyStrategy = DummyApplyStrategy()
     else:
         apply_strategy = GitExecutableApplyStrategy()
 
@@ -83,7 +97,7 @@ def suggest_basic(paths=None, root_rev=None, is_dry_run=False):
     return head, final
 
 
-def build_initial_diff_cmd(paths):
+def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
     cmd = [
         'diff-index',
         '--cached',
@@ -98,9 +112,10 @@ def build_initial_diff_cmd(paths):
     return cmd
 
 
-def resolve_revision(head):
+def resolve_revision(head: Union[bytes, str]) -> str:
     try:
         _, out, _ = call_git('rev-parse', '--verify', head)
+        out = cast(bytes, out)
     except Fatal as exc:
         raise Fatal(
             f'invalid revision {head!r}',

@@ -1,7 +1,21 @@
+from __future__ import annotations
+
+from typing import (
+    cast,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Match,
+    NamedTuple,
+    Optional,
+    Type,
+)
+
 import re
 from enum import Enum
 from types import SimpleNamespace as NS
-from collections import namedtuple
 
 from .git import Hunk, DiffLineType
 from .errors import Fatal
@@ -25,10 +39,16 @@ DIFF_TREE_FILE_RENAME = re.compile(
     rb'^:(\d+) (\d+) ([a-f0-9]+) ([a-f0-9]+) R(\d+)\t(.*)\t(.*)'
 )
 
-FileDiffSummary = namedtuple(
-    'FileDiffSummary',
-    'old_mode, new_mode, old_oid, new_oid, delta_type, similarity, old_path, new_path',
-)
+
+class FileDiffSummary(NamedTuple):
+    old_mode: str
+    new_mode: str
+    old_oid: str
+    new_oid: str
+    delta_type: str
+    similarity: Optional[int]
+    old_path: Optional[bytes]
+    new_path: Optional[bytes]
 
 
 class DiffParseState(Enum):
@@ -39,19 +59,21 @@ class DiffParseState(Enum):
 
 
 class DiffParseResult:
-    def __init__(self, state, attrs, hunk=None):
+    def __init__(
+        self, state: DiffParseState, attrs: Any, hunk: Optional[Hunk] = None
+    ) -> None:
         self.state = state
         self.attrs = attrs
         self.hunk = hunk
 
     @staticmethod
-    def for_diff_header():
+    def for_diff_header() -> DiffParseResult:
         return DiffParseResult(
             DiffParseState.DiffHeader,
             NS(old_file=None, old_file_seen=False, new_file=None, new_file_seen=False),
         )
 
-    def with_hunk(self, hunk):
+    def with_hunk(self, hunk: Hunk) -> DiffParseResult:
         return DiffParseResult(self.state, self.attrs, hunk)
 
 
@@ -59,13 +81,16 @@ DIFF_PARSE_INITIAL = DiffParseResult(DiffParseState.Initial, None)
 DIFF_PARSE_INVALID = DiffParseResult(DiffParseState.Invalid, None)
 
 
-def parse_diff_hunks(diff):
+DiffParseHandler = Callable[[Type['DiffParser'], Any, bytes], DiffParseResult]
+
+
+def parse_diff_hunks(diff: bytes) -> Iterator[Hunk]:
     return DiffParser.parse_diff_hunks(diff)
 
 
 class DiffParser:
     @classmethod
-    def parse_diff_hunks(cls, diff):
+    def parse_diff_hunks(cls, diff: bytes) -> Iterator[Hunk]:
         res = DIFF_PARSE_INITIAL
 
         # Don't use splitlines; git can put a CR in the middle of a
@@ -100,28 +125,31 @@ class DiffParser:
         if res.state == DiffParseState.InHunk:
             yield Hunk(**res.attrs.__dict__)  # pylint: disable=missing-kwoa
 
-    handlers = {}
+    handlers: Dict[DiffParseState, DiffParseHandler] = {}
 
-    def _register(
-        state, handlers=handlers
-    ):  # pylint: disable=no-self-argument,dangerous-default-value
-        def inner(func):
+    def _register(  # type: ignore  # pylint: disable=no-self-argument,dangerous-default-value
+        state: DiffParseState,
+        handlers: Dict[DiffParseState, DiffParseHandler] = handlers,
+    ) -> Callable[[DiffParseHandler], DiffParseHandler]:
+        def inner(func: DiffParseHandler) -> DiffParseHandler:
             handlers[state] = func
             return func
 
         return inner
 
     @classmethod
-    def handle_line_parsing(cls, state, attrs, line):
+    def handle_line_parsing(
+        cls, state: DiffParseState, attrs: Any, line: bytes
+    ) -> DiffParseResult:
         if state not in cls.handlers:
             raise ValueError(f'Unknown state {state!r}')  # pragma nocover
 
-        handler = cls.handlers[state]
-        return handler.__func__(cls, attrs, line)
+        handler: DiffParseHandler = cast(Any, cls.handlers[state]).__func__
+        return handler(cls, attrs, line)
 
     @_register(DiffParseState.Initial)
     @classmethod
-    def _handle_initial(cls, _attrs, line):
+    def _handle_initial(cls, _attrs: Any, line: bytes) -> DiffParseResult:
         if not DIFF_HEADER.match(line):
             # Ignore initial diffstat output
             return DIFF_PARSE_INITIAL
@@ -130,7 +158,7 @@ class DiffParser:
 
     @_register(DiffParseState.DiffHeader)
     @classmethod
-    def _handle_diff_header(cls, attrs, line):
+    def _handle_diff_header(cls, attrs: Any, line: bytes) -> DiffParseResult:
         # pylint: disable=too-many-return-statements
 
         if DIFF_FSTAT.match(line) or DIFF_MODE.match(line):
@@ -173,7 +201,7 @@ class DiffParser:
 
     @_register(DiffParseState.InHunk)
     @classmethod
-    def _handle_in_hunk(cls, attrs, line):
+    def _handle_in_hunk(cls, attrs: Any, line: bytes) -> DiffParseResult:
         # pylint: disable=too-many-return-statements
 
         if DIFF_HEADER.match(line):
@@ -214,7 +242,9 @@ class DiffParser:
     del _register
 
     @classmethod
-    def _handle_diff_hunk_start(cls, _line, attrs, match):
+    def _handle_diff_hunk_start(
+        cls, _line: bytes, attrs: Any, match: Match[bytes]
+    ) -> DiffParseResult:
         attrs = NS(
             old_file=attrs.old_file,
             new_file=attrs.new_file,
@@ -226,7 +256,7 @@ class DiffParser:
         return DiffParseResult(DiffParseState.InHunk, attrs)
 
 
-def parse_diff_tree_summary(diff_tree_lines):
+def parse_diff_tree_summary(diff_tree_lines: bytes) -> List[FileDiffSummary]:
     lines = diff_tree_lines.split(b'\n')
     summary_lines = []
 
@@ -236,10 +266,12 @@ def parse_diff_tree_summary(diff_tree_lines):
 
         match = DIFF_TREE_FILE.match(line)
         if match:
-            old_mode, new_mode, old_oid, new_oid, delta_type, new_path = match.groups()
-            old_mode, new_mode, old_oid, new_oid, delta_type = (
-                v.decode() for v in [old_mode, new_mode, old_oid, new_oid, delta_type]
-            )
+            old_mode = match.group(1).decode()
+            new_mode = match.group(2).decode()
+            old_oid = match.group(3).decode()
+            new_oid = match.group(4).decode()
+            delta_type = match.group(5).decode()
+            new_path: Optional[bytes] = match.group(6)
 
             old_path = None if all(n == '0' for n in old_oid) else new_path
             if all(n == '0' for n in new_oid):
@@ -253,13 +285,14 @@ def parse_diff_tree_summary(diff_tree_lines):
                     f'unable to parse diff-tree output line {idx + 1}:',
                     extended=build_context_lines(lines, idx),
                 )
-            old_mode, new_mode, old_oid, new_oid, similarity, old_path, new_path = (
-                match.groups()
-            )
-            old_mode, new_mode, old_oid, new_oid = (
-                v.decode() for v in [old_mode, new_mode, old_oid, new_oid]
-            )
-            similarity = int(similarity)
+            old_mode = match.group(1).decode()
+            new_mode = match.group(2).decode()
+            old_oid = match.group(3).decode()
+            new_oid = match.group(4).decode()
+            similarity = int(match.group(5))
+            old_path = match.group(6)
+            new_path = match.group(7)
+
             delta_type = 'R'
 
         summary_lines.append(
@@ -278,13 +311,13 @@ def parse_diff_tree_summary(diff_tree_lines):
     return summary_lines
 
 
-def build_context_lines(lines, line_index):
+def build_context_lines(lines: List[bytes], line_index: int) -> str:
     start_index = max(line_index - 5, 0)
     context = []
     padding = max(3, len(str(line_index + 5)))
-    for i, ctx_line in enumerate(
+    for i, ctx_line_src in enumerate(
         lines[start_index : line_index + 5], start=start_index
     ):
-        ctx_line = ctx_line.decode(errors='replace')
+        ctx_line = ctx_line_src.decode(errors='replace')
         context.append(f'{i + 1:<{padding}} {ctx_line}')
     return '\n'.join(context)

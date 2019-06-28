@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import List, Optional
+
 from pprint import pformat
 from unittest import TestCase
 
@@ -241,12 +245,12 @@ class ParseDiffHunksTest(TestCase):
 
     maxDiff = None
 
-    def test_diff_hunk_basic(self):
+    def test_diff_hunk_basic(self) -> None:
         hunks = list(parse_diff_hunks(BASIC_DIFF))
         self.assertEqual([h.ops for h in BASIC_HUNKS], [h.ops for h in hunks])
         self.assertEqual(BASIC_HUNKS, hunks)
 
-    def test_diff_hunk_malformed(self):
+    def test_diff_hunk_malformed(self) -> None:
         diff_lines = [
             # 0
             b'diff --git a/test_file.txt b/test_file.txt\n',
@@ -307,7 +311,9 @@ class ParseDiffHunksTest(TestCase):
                 7, diff_lines[:6] + [b'?' + diff_lines[6][1:]]
             )
 
-    def assert_diff_parse_fails_on_line(self, failure_line, lines, msg=None):
+    def assert_diff_parse_fails_on_line(
+        self, failure_line: int, lines: List[bytes], msg: Optional[str] = None
+    ) -> None:
         try:
             hunks = list(parse_diff_hunks(b''.join(lines)))
         except Fatal as exc:
@@ -324,10 +330,10 @@ class ParseDiffTreeTest(TestCase):
 
     maxDiff = None
 
-    def test_diff_tree_basic(self):
+    def test_diff_tree_basic(self) -> None:
         summary = list(parse_diff_tree_summary(BASIC_TREE_DIFF))
         self.assertEqual(EXPECTED_BASIC_TREE_SUMMARY, summary)
 
-    def test_diff_tree_malformed_line(self):
+    def test_diff_tree_malformed_line(self) -> None:
         with self.assertRaisesRegex(Fatal, 'unable to parse diff-tree output line 1'):
             parse_diff_tree_summary(b'????\n')

@@ -1,49 +1,49 @@
 """Strategies used to apply rewrites
 """
 
+from __future__ import annotations
+
+import typing
+from typing import cast, List
+
 import os
-from abc import ABC, abstractmethod
 
-from .git import TreeListingEntry, call_git, call_git_async, ls_tree, mk_tree
-
-
-class AbstractApplyStrategy(ABC):
-    """Interface for strategies used to apply rewrites
-
-    Each write method returns the resulting OID.
-    """
-
-    @abstractmethod
-    def write_commit(self, commit_info, tree, new_parents):
-        raise NotImplementedError()
-
-    @abstractmethod
-    def write_tree(self, commit_info, amended_blobs_with_oids):
-        """Recursively rewrite the root tree"""
-        raise NotImplementedError()
-
-    @abstractmethod
-    def write_blob(self, amended_blob):
-        raise NotImplementedError()
+from .amend import AmendedBlob, AbstractApplyStrategy
+from .git import (
+    CommitListingEntry,
+    TreeListingEntry,
+    call_git,
+    call_git_async,
+    ls_tree,
+    mk_tree,
+)
 
 
 class DummyApplyStrategy(AbstractApplyStrategy):
     """Simply return the original OIDs"""
 
-    def write_commit(self, commit_info, tree, new_parents):
+    def write_commit(
+        self, commit_info: CommitListingEntry, tree: str, new_parents: List[str]
+    ) -> str:
         return f'{commit_info.oid}/fake-amended'
 
-    def write_tree(self, commit_info, amended_blobs_with_oids):
+    def write_tree(
+        self,
+        commit_info: CommitListingEntry,
+        amended_blobs_with_oids: List[AmendedBlob],
+    ) -> str:
         return f'{commit_info.tree_oid}/fake-amended'
 
-    def write_blob(self, amended_blob):
+    def write_blob(self, amended_blob: AmendedBlob) -> str:
         return f'{amended_blob.oid}/fake-amended'
 
 
 class GitExecutableApplyStrategy(AbstractApplyStrategy):
     """Write the commits by calling out to the git executable"""
 
-    def write_commit(self, commit_info, tree, new_parents):
+    def write_commit(
+        self, commit_info: CommitListingEntry, tree: str, new_parents: List[str]
+    ) -> str:
         parent_args = []
         for new_parent in new_parents:
             parent_args.append('-p')
@@ -60,16 +60,21 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
                 GIT_AUTHOR_DATE=commit_info.a_date,
             ),
         )
+        out = cast(bytes, out)
 
         print('-> new commit', out.decode().strip())
 
         return out.decode().strip()
 
-    def write_tree(self, commit_info, amended_blobs_with_oids):
+    def write_tree(
+        self,
+        commit_info: CommitListingEntry,
+        amended_blobs_with_oids: List[AmendedBlob],
+    ) -> str:
         print(
             'amended tree:',
             ' '.join(
-                b.file.decode(errors='replace') + f'={b.amended_oid[:10]}'
+                b.file.decode(errors='replace') + f'={cast(str, b.amended_oid)[:10]}'
                 for b in amended_blobs_with_oids
             ),
         )
@@ -77,17 +82,17 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
         if not amended_blobs_with_oids:
             return commit_info.tree_oid
 
-        new_blobs = {b.file: b.amended_oid for b in amended_blobs_with_oids}
+        new_blobs = {b.file: cast(str, b.amended_oid) for b in amended_blobs_with_oids}
 
-        dirs = set()
+        dir_set = set()
         for path in new_blobs:
             subdir = os.path.dirname(path)
             while subdir:
-                dirs.add(subdir)
+                dir_set.add(subdir)
                 subdir = os.path.dirname(subdir)
 
         dirs = sorted(
-            dirs, key=lambda subdir: (subdir.count(b'/'), subdir), reverse=True
+            dir_set, key=lambda subdir: (subdir.count(b'/'), subdir), reverse=True
         )
 
         # Special case: the repository's root directory
@@ -110,7 +115,7 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
 
         return new_blobs[b'.']
 
-    def write_blob(self, amended_blob):
+    def write_blob(self, amended_blob: AmendedBlob) -> str:
         print(
             'write blob:',
             amended_blob.commit[:10],
@@ -118,9 +123,9 @@ class GitExecutableApplyStrategy(AbstractApplyStrategy):
         )
 
         with call_git_async('hash-object', '-tblob', '--stdin', '-w') as proc:
-            amended_blob.write(proc.stdin)
+            amended_blob.write(cast(typing.BinaryIO, proc.stdin))
             proc.stdin.close()
 
-            out = proc.stdout.read()
+            out: bytes = proc.stdout.read()
 
         return out.decode().strip()
