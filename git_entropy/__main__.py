@@ -9,6 +9,19 @@ from .errors import Fatal
 
 
 def main() -> None:
+    try:
+        run_main()
+    except Fatal as exc:
+        print(f'fatal: {exc}', file=sys.stderr)
+        if exc.extended:
+            print(file=sys.stderr)
+            print(exc.extended, file=sys.stderr)
+        sys.exit(exc.returncode)
+    except KeyboardInterrupt:
+        sys.exit(1)
+
+
+def run_main() -> None:
     parser = argparse.ArgumentParser('git entropy')
 
     root_opts = parser.add_mutually_exclusive_group(required=True)
@@ -50,15 +63,3 @@ def main() -> None:
     call_git(
         'update-ref', '-m', 'entropy: absorb staged changes', 'HEAD', new_head, old_head
     )
-
-
-try:
-    main()
-except Fatal as exc:
-    print(f'fatal: {exc}', file=sys.stderr)
-    if exc.extended:
-        print(file=sys.stderr)
-        print(exc.extended, file=sys.stderr)
-    sys.exit(exc.returncode)
-except KeyboardInterrupt:
-    sys.exit(1)
