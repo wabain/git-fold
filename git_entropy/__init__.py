@@ -49,7 +49,7 @@ def suggest_basic(
     for hunk in parse_diff_hunks(diff):
         add_hunk_to_plan(hunk, plan)
 
-    if not plan.commits:
+    if not plan.has_amendments():
         return head, head
 
     # TODO: Add interactive mode
@@ -85,7 +85,7 @@ def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
                 continue
 
             for partial_target_range, _ in blame_outputs:
-                plan.amend_range(partial_target_range, b'')
+                plan.add_amended_range(partial_target_range, b'')
 
             continue
 
@@ -96,7 +96,7 @@ def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
         else:
             new_content = hunk.new_range_content(new_range.start, new_range.extent)
 
-        plan.amend_range(target_range, new_content)
+        plan.add_amended_range(target_range, new_content)
 
 
 def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:

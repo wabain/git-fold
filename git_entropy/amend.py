@@ -28,22 +28,20 @@ class AmendmentRecord(NamedTuple):
 
 
 class AmendmentPlan:
-    # TODO: This code would benefit from some cleanup once the algorithm seems
-    # more settled
-    #
-    # pylint: disable=no-self-use,too-many-arguments,too-many-locals
-
     def __init__(self, head: OID, root: Optional[OID]):
         self.head = head
         self.root = root
-        self.commits: Dict[OID, Dict[bytes, AmendedBlob]] = {}
+        self._amendments: Dict[OID, Dict[bytes, AmendedBlob]] = {}
+
+    def has_amendments(self) -> bool:
+        return bool(self._amendments)
 
     def blame_range(
         self, idx_range: IndexedRange
     ) -> List[Tuple[IndexedRange, IndexedRange]]:
         return run_blame(idx_range, root_rev=self.root)
 
-    def amend_range(self, indexed_range: IndexedRange, new_lines: bytes) -> None:
+    def add_amended_range(self, indexed_range: IndexedRange, new_lines: bytes) -> None:
         for_commit = self._for_commit(indexed_range.rev)
         try:
             for_blob = for_commit[indexed_range.file]
@@ -56,48 +54,81 @@ class AmendmentPlan:
 
     def _for_commit(self, commit_oid: OID) -> Dict[bytes, AmendedBlob]:
         try:
-            return self.commits[commit_oid]
+            return self._amendments[commit_oid]
         except KeyError:
-            out = self.commits[commit_oid] = {}
+            out = self._amendments[commit_oid] = {}
             return out
 
     def write_commits(self, apply_strategy: AbstractApplyStrategy) -> OID:
-        commit_graph = CommitGraph.build_partial(
-            head=self.head, roots=list(self.commits)
+        builder = AmendedBranchBuilder(
+            head=self.head, amendments=self._amendments, apply_strategy=apply_strategy
+        )
+        return builder.apply()
+
+
+class AmendedBranchBuilder:
+    # TODO: This code would benefit from some cleanup once the algorithm seems
+    # more settled
+    #
+    # pylint: disable=too-few-public-methods,too-many-arguments
+
+    def __init__(
+        self,
+        head: OID,
+        amendments: Dict[OID, Dict[bytes, AmendedBlob]],
+        apply_strategy: AbstractApplyStrategy,
+    ) -> None:
+        self.head = head
+        self.amendments = amendments
+        self.apply_strategy = apply_strategy
+
+        self.commit_graph = CommitGraph.build_partial(
+            head=self.head, roots=list(self.amendments)
         )
 
         # Map { old_commit: (new_commit, { path: amended_blob } }
-        amended_commits: Dict[OID, Tuple[OID, Dict[bytes, AmendedBlob]]] = {}
+        self.amended_commits: Dict[OID, Tuple[OID, Dict[bytes, AmendedBlob]]] = {}
 
-        for to_rewrite in commit_graph.reverse_topo_ordering(self.head):
+    def apply(self) -> OID:
+        amended_head = self.head
+
+        for to_rewrite in self.commit_graph.reverse_topo_ordering(self.head):
             # FIXME: Might need a more scaleable way to do this? (e.g. batch)
             commit_info = cat_commit(to_rewrite)
             print('handling', commit_info.oneline())
 
-            parents = commit_graph.get_parents(to_rewrite)
-            new_parents, parent_amendments = self._get_amended_parents(
-                parents, amended_commits
-            )
-            new_amendments = self.commits.get(to_rewrite)
-            assert new_parents != parents or new_amendments is not None
+            new_amendments = self.amendments.get(to_rewrite)
+            amended_oid = self._amend_commit(commit_info, new_amendments)
 
-            coalesced = self._coalesce_amended_blobs(
-                commit_info, new_amendments or {}, parent_amendments
-            )
-            new_commit_oid, blobs_with_amendments = self._rewrite_commit(
-                apply_strategy, commit_info, new_parents, coalesced
-            )
-            amended_commits[to_rewrite] = (
-                new_commit_oid,
-                {b.file: b for b in blobs_with_amendments},
-            )
+            if to_rewrite == self.head:
+                amended_head = amended_oid
 
-        return amended_commits[self.head][0]
+        return amended_head
+
+    def _amend_commit(
+        self,
+        commit_info: git.CommitListingEntry,
+        amendments: Optional[Dict[bytes, AmendedBlob]],
+    ) -> OID:
+        parents = self.commit_graph.get_parents(commit_info.commit_oid)
+
+        new_parents, parent_amendments = self._get_amended_parents(parents)
+        assert new_parents != parents or amendments is not None
+
+        coalesced = self._coalesce_amended_blobs(
+            commit_info, amendments or {}, parent_amendments
+        )
+        new_commit_oid, blobs_with_amendments = self._rewrite_commit(
+            commit_info, new_parents, coalesced
+        )
+        self.amended_commits[commit_info.commit_oid] = (
+            new_commit_oid,
+            {b.file: b for b in blobs_with_amendments},
+        )
+        return new_commit_oid
 
     def _get_amended_parents(
-        self,
-        parents: List[OID],
-        amended_commits: Dict[OID, Tuple[OID, Dict[bytes, AmendedBlob]]],
+        self, parents: List[OID]
     ) -> Tuple[List[OID], Dict[bytes, Dict[OID, AmendedBlob]]]:
         """Return a pair (new_parents, parent_amendments)
 
@@ -112,7 +143,7 @@ class AmendmentPlan:
 
         for parent in parents:
             try:
-                (new_parent, new_parent_amendments) = amended_commits[parent]
+                (new_parent, new_parent_amendments) = self.amended_commits[parent]
             except KeyError:
                 new_parents.append(parent)
                 continue
@@ -126,16 +157,19 @@ class AmendmentPlan:
 
     def _rewrite_commit(
         self,
-        apply_strategy: AbstractApplyStrategy,
         commit_info: git.CommitListingEntry,
         new_parents: List[OID],
         amendments: Dict[bytes, AmendedBlob],
     ) -> Tuple[OID, List[AmendedBlob]]:
-        amended_with_oids = list(self._write_amended_blobs(apply_strategy, amendments))
+        amended_with_oids = list(
+            self._write_amended_blobs(self.apply_strategy, amendments)
+        )
 
-        new_tree_oid = apply_strategy.write_tree(commit_info, amended_with_oids)
+        new_tree_oid = self.apply_strategy.write_tree(commit_info, amended_with_oids)
 
-        new_oid = apply_strategy.write_commit(commit_info, new_tree_oid, new_parents)
+        new_oid = self.apply_strategy.write_commit(
+            commit_info, new_tree_oid, new_parents
+        )
 
         return new_oid, amended_with_oids
 
@@ -193,8 +227,8 @@ class AmendmentPlan:
 
         return coalesced
 
+    @staticmethod
     def _find_fast_forward_parent(
-        self,
         path: bytes,
         commit_info: git.CommitListingEntry,
         parents: Dict[OID, AmendedBlob],
@@ -242,8 +276,8 @@ class AmendmentPlan:
         assert not set(coalesced) & set(partially_coalesced)
         coalesced.update(partially_coalesced)
 
+    @staticmethod
     def _account_for_diff_against_parent(
-        self,
         partially_coalesced: Dict[bytes, AmendedBlob],
         old_parent_oid: OID,
         commit_info: git.CommitListingEntry,
@@ -295,10 +329,9 @@ class AmendmentPlan:
 
         return handled
 
+    @staticmethod
     def _write_amended_blobs(
-        self,
-        apply_strategy: AbstractApplyStrategy,
-        amended_blobs: Dict[bytes, AmendedBlob],
+        apply_strategy: AbstractApplyStrategy, amended_blobs: Dict[bytes, AmendedBlob]
     ) -> Iterator[AmendedBlob]:
         for amended_blob in amended_blobs.values():
             if amended_blob.amended_oid is not None:
