@@ -287,7 +287,7 @@ def mk_tree(entries: Iterable[TreeListingEntry]) -> OID:
         f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
 
-    _, out, _ = call_git('mktree', input=git_input)
+    _, out, _ = call_git('mktree', '--missing', input=git_input)
 
     return OID(out.strip())
 
