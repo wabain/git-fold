@@ -137,6 +137,8 @@ def parse_block(
     int,  # new line
     bool,  # starts seq
 ]:
+    # pylint: disable=redefined-argument-from-local
+
     header_entry = as_header(blame_lines[idx].split())
     if header_entry is None:
         raise ValueError(

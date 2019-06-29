@@ -14,6 +14,7 @@ from abc import ABC, abstractmethod
 from itertools import chain
 
 from . import git
+from .blame import run_blame
 from .git import OID, ls_tree, cat_commit, call_git, IndexedRange
 from .log import CommitGraph
 from .errors import Fatal
@@ -27,9 +28,20 @@ class AmendmentRecord(NamedTuple):
 
 
 class AmendmentPlan:
-    def __init__(self, head: OID):
+    # TODO: This code would benefit from some cleanup once the algorithm seems
+    # more settled
+    #
+    # pylint: disable=no-self-use,too-many-arguments,too-many-locals
+
+    def __init__(self, head: OID, root: Optional[OID]):
         self.head = head
+        self.root = root
         self.commits: Dict[OID, Dict[bytes, AmendedBlob]] = {}
+
+    def blame_range(
+        self, idx_range: IndexedRange
+    ) -> List[Tuple[IndexedRange, IndexedRange]]:
+        return run_blame(idx_range, root_rev=self.root)
 
     def amend_range(self, indexed_range: IndexedRange, new_lines: bytes) -> None:
         for_commit = self._for_commit(indexed_range.rev)

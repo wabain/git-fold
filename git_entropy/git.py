@@ -430,4 +430,3 @@ def get_display_command(cmd: Sequence[Union[bytes, str]]) -> str:
     return ' '.join(
         c.decode(errors='replace') if isinstance(c, bytes) else c for c in cmd
     )
-

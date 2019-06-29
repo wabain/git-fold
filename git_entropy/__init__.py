@@ -29,8 +29,7 @@ import sys
 
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
-from .blame import run_blame
-from .git import OID, call_git
+from .git import OID, Hunk, call_git
 from .amend import AmendmentPlan, AbstractApplyStrategy
 from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
 
@@ -45,42 +44,10 @@ def suggest_basic(
 
     _, diff, _ = call_git(*build_initial_diff_cmd(paths))
 
-    plan = AmendmentPlan(head=head)
+    plan = AmendmentPlan(head=head, root=root_oid)
 
     for hunk in parse_diff_hunks(diff):
-        for old_range, new_range in hunk.get_edits(old_rev=head, new_rev=OID(0)):
-            # Can't handle insert-only edits for now; even using a heuristic
-            # like the source of the context lines, there's no guarantee that
-            # intervening lines weren't added then deleted around this point.
-            #
-            # Need to track the lines back via diff
-            if old_range is None or old_range.extent == 0:
-                continue
-
-            blame_outputs = run_blame(old_range, root_rev=root_oid)
-
-            if not blame_outputs:
-                continue
-
-            if len(blame_outputs) > 1:
-                # Can't handle backporting to multiple commits when there are
-                # new changes to be applied
-                if new_range is not None and new_range.extent > 0:
-                    continue
-
-                for partial_target_range, _ in blame_outputs:
-                    plan.amend_range(partial_target_range, b'')
-
-                continue
-
-            target_range, _ = blame_outputs[0]
-
-            if new_range is None:
-                new_content = b''
-            else:
-                new_content = hunk.new_range_content(new_range.start, new_range.extent)
-
-            plan.amend_range(target_range, new_content)
+        add_hunk_to_plan(hunk, plan)
 
     if not plan.commits:
         return head, head
@@ -94,6 +61,42 @@ def suggest_basic(
 
     final = plan.write_commits(apply_strategy=apply_strategy)
     return head, final
+
+
+def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
+    for old_range, new_range in hunk.get_edits(old_rev=plan.head, new_rev=OID(0)):
+        # Can't handle insert-only edits for now; even using a heuristic
+        # like the source of the context lines, there's no guarantee that
+        # intervening lines weren't added then deleted around this point.
+        #
+        # Need to track the lines back via diff
+        if old_range is None or old_range.extent == 0:
+            continue
+
+        blame_outputs = plan.blame_range(old_range)
+
+        if not blame_outputs:
+            continue
+
+        if len(blame_outputs) > 1:
+            # Can't handle backporting to multiple commits when there are
+            # new changes to be applied
+            if new_range is not None and new_range.extent > 0:
+                continue
+
+            for partial_target_range, _ in blame_outputs:
+                plan.amend_range(partial_target_range, b'')
+
+            continue
+
+        target_range, _ = blame_outputs[0]
+
+        if new_range is None:
+            new_content = b''
+        else:
+            new_content = hunk.new_range_content(new_range.start, new_range.extent)
+
+        plan.amend_range(target_range, new_content)
 
 
 def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
