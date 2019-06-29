@@ -2,9 +2,18 @@ from __future__ import annotations
 
 import os
 from subprocess import run
-from typing import List
+from typing import List, NamedTuple, Union
 from distutils.errors import DistutilsError
+from distutils import log
 from setuptools import Command, setup, find_packages
+
+
+class Check(NamedTuple):
+    cmd: Union[str, List[str]]
+    shell: bool = False
+
+    def display_cmd(self) -> str:
+        return self.cmd if isinstance(self.cmd, str) else ' '.join(self.cmd)
 
 
 class CheckCommand(Command):  # type: ignore
@@ -19,11 +28,75 @@ class CheckCommand(Command):  # type: ignore
     def run(self) -> None:
         here = os.path.dirname(os.path.abspath(__file__))
 
-        res = run(['mypy', '--strict', '--ignore-missing-imports', '.'], cwd=here)
-        if res.returncode != 0:
-            msg = f'Typecheck failed (exit code {res.returncode})'
-            self.announce(msg)
-            raise DistutilsError(msg)
+        checks: List[Union[Check, str]] = [
+            # fmt: off
+
+            'test',
+
+            # Specify files and directories directly because black's file ignoring
+            # will look at the absolute path:
+            # https://github.com/python/black/issues/712
+            Check('black --check --diff *.py git_entropy', shell=True),
+
+            Check(['mypy', '--strict', '--ignore-missing-imports', '.']),
+
+            Check('pylint *.py git_entropy', shell=True),
+        ]
+
+        return_codes: List[Union[bool, int]] = []
+
+        for check_count, check in enumerate(checks, start=1):
+            self.announce(
+                f'\nCheck {check_count}: {display_check(check)}', level=log.INFO
+            )
+
+            if isinstance(check, str):
+                success = True
+                try:
+                    self.run_command(check)
+                except DistutilsError:
+                    success = False
+
+                return_codes.append(success)
+            else:
+                res = run(check.cmd, shell=check.shell, cwd=here)
+
+                self.announce(f'Return code: {res.returncode}', level=log.DEBUG)
+                return_codes.append(res.returncode)
+
+        self.announce('\nResults:', level=log.INFO)
+
+        for check_count, (check, retcode) in enumerate(
+            zip(checks, return_codes), start=1
+        ):
+            res_out = (
+                '    ' if isinstance(retcode, bool) or retcode == 0 else f'({retcode})'
+            )
+            self.announce(
+                f'{get_mark(retcode)} {res_out: <4}{check_count}: {display_check(check)}',
+                level=log.INFO,
+            )
+
+        if not all(retcode_success(retcode) for retcode in return_codes):
+            raise DistutilsError('Some checks unsuccessful')
+
+
+def display_check(check: Union[Check, str]) -> str:
+    if isinstance(check, str):
+        return f'setup.py {check}'
+
+    return check.display_cmd()
+
+
+def retcode_success(retcode: Union[bool, int]) -> bool:
+    if isinstance(retcode, bool):
+        return retcode
+
+    return retcode == 0
+
+
+def get_mark(retcode: Union[bool, int]) -> str:
+    return '✨' if retcode_success(retcode) else '❌'
 
 
 with open('README.md') as f:
@@ -62,7 +135,9 @@ setup(
 
     extras_require={
         'dev': [
+            'black>=19.2<20',
             'mypy==0.711',
+            'pylint>=2.3,<3',
         ],
         'test': [
             'coverage>=4.5,<5',
