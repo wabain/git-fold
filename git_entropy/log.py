@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set
 
-from .git import OID, call_git
+from .git import OID, async_call_git
 
 
 class CommitGraph:
     @classmethod
-    def build_partial(cls, head: OID, roots: List[OID]) -> CommitGraph:
+    async def build_partial(cls, head: OID, roots: List[OID]) -> CommitGraph:
         """Build the commit graph from the head ref to the root refs
 
         This is implemented by call `git rev-list head ^root` for each root;
@@ -20,9 +20,9 @@ class CommitGraph:
             if root in graph:
                 continue
 
-            graph.add_path(head, root)
+            await graph.add_path(head, root)
 
-        graph.add_commits(roots)
+        await graph.add_commits(roots)
         return graph
 
     def __init__(self) -> None:
@@ -34,16 +34,16 @@ class CommitGraph:
     def get_parents(self, commit_oid: OID) -> List[OID]:
         return self.child_to_parents[commit_oid]
 
-    def add_commits(self, commits: List[OID]) -> None:
+    async def add_commits(self, commits: List[OID]) -> None:
         """Add the specified commits to the graph"""
-        _, output, _ = call_git(
+        _, output, _ = await async_call_git(
             'rev-list', '--parents', '--no-walk', *(str(c) for c in commits), '--'
         )
         self._add_from_rev_list_parents(output)
 
-    def add_path(self, head: OID, root: OID) -> None:
+    async def add_path(self, head: OID, root: OID) -> None:
         """Add all commits on the ancestry path from head to root to the graph"""
-        _, output, _ = call_git(
+        _, output, _ = await async_call_git(
             'rev-list', '--parents', '--ancestry-path', str(head), f'^{root}', '--'
         )
         self._add_from_rev_list_parents(output)

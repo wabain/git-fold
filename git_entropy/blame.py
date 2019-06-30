@@ -4,7 +4,7 @@ from typing import Dict, Iterator, List, NamedTuple, Optional, Tuple, Union
 
 import itertools
 
-from .git import OID, call_git, IndexedRange
+from .git import OID, async_call_git, IndexedRange
 
 
 class BlameCommitProperties(NamedTuple):
@@ -21,7 +21,7 @@ class BlameLineProperties(NamedTuple):
     starts_seq: bool
 
 
-def run_blame(
+async def run_blame(
     indexed_range: IndexedRange, root_rev: Optional[OID] = None
 ) -> List[Tuple[IndexedRange, IndexedRange]]:
     if indexed_range.extent == 0:
@@ -32,7 +32,7 @@ def run_blame(
     else:
         revision_range = f'{root_rev}..{indexed_range.rev}'
 
-    _, out, _ = call_git(
+    _, out, _ = await async_call_git(
         'blame',
         '--porcelain',
         f'-L{indexed_range.start},+{indexed_range.extent}',

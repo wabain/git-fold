@@ -62,12 +62,14 @@ class AmendmentPlan:
     def has_amendments(self) -> bool:
         return bool(self._amendments)
 
-    def blame_range(
+    async def blame_range(
         self, idx_range: IndexedRange
     ) -> List[Tuple[IndexedRange, IndexedRange]]:
-        return run_blame(idx_range, root_rev=self.root)
+        return await run_blame(idx_range, root_rev=self.root)
 
-    def add_amended_range(self, indexed_range: IndexedRange, new_lines: bytes) -> None:
+    async def add_amended_range(
+        self, indexed_range: IndexedRange, new_lines: bytes
+    ) -> None:
         for_commit = self._for_commit(indexed_range.rev)
         try:
             for_blob = for_commit[indexed_range.file]
@@ -75,7 +77,7 @@ class AmendmentPlan:
             for_blob = AmendedBlob(
                 indexed_range.rev,
                 indexed_range.file,
-                indexed_range.blob_oid(),
+                await indexed_range.blob_oid(),
                 rewrite_data=None,
             )
             for_commit[indexed_range.file] = for_blob
@@ -88,12 +90,10 @@ class AmendmentPlan:
             out = self._amendments[commit_oid] = {}
             return out
 
-    def write_commits(self, apply_strategy: AbstractApplyStrategy) -> OID:
-        builder = AmendedBranchBuilder(
+    async def write_commits(self, apply_strategy: AbstractApplyStrategy) -> OID:
+        return await AmendedBranchBuilder.write(
             head=self.head, amendments=self._amendments, apply_strategy=apply_strategy
         )
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(builder.apply())
 
 
 class RewrittenCommit(NamedTuple):
@@ -111,19 +111,29 @@ class AmendedBranchBuilder:
     #
     # pylint: disable=too-few-public-methods,too-many-arguments
 
+    @staticmethod
+    async def write(
+        head: OID,
+        amendments: Dict[OID, Dict[bytes, AmendedBlob[None]]],
+        apply_strategy: AbstractApplyStrategy,
+    ) -> OID:
+        commit_graph = await CommitGraph.build_partial(
+            head=head, roots=list(amendments)
+        )
+        builder = AmendedBranchBuilder(head, amendments, commit_graph, apply_strategy)
+        return await builder.apply()
+
     def __init__(
         self,
         head: OID,
         amendments: Dict[OID, Dict[bytes, AmendedBlob[None]]],
+        commit_graph: CommitGraph,
         apply_strategy: AbstractApplyStrategy,
     ) -> None:
         self.head = head
         self.amendments = amendments
+        self.commit_graph = commit_graph
         self.apply_strategy = apply_strategy
-
-        self.commit_graph = CommitGraph.build_partial(
-            head=self.head, roots=list(self.amendments)
-        )
 
         self.amended_commits: Dict[OID, RewrittenCommit] = {}
 

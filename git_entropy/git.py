@@ -115,9 +115,9 @@ class IndexedRange:
         self.extent = extent
         self._blob_oid: Optional[OID] = None
 
-    def blob_oid(self) -> OID:
+    async def blob_oid(self) -> OID:
         if self._blob_oid is None:
-            for entry in ls_tree(self.rev, '--', self.file):
+            for entry in await async_ls_tree(self.rev, '--', self.file):
                 if entry.obj_type != 'blob':
                     # TODO: sanity check; maybe some non-blobs are okay
                     raise ValueError(
@@ -273,11 +273,6 @@ class Hunk:
             f_repr = f'rename {display_old_file} to {display_new_file}'
 
         return f'<Hunk {f_repr} @@ -{self.old_start} +{self.new_start}>'
-
-
-def ls_tree(*args: Union[bytes, str, OID]) -> Iterator[TreeListingEntry]:
-    _, out, _ = call_git('ls-tree', *args)
-    return _parse_ls_tree(out)
 
 
 async def async_ls_tree(*args: Union[bytes, str, OID]) -> Iterator[TreeListingEntry]:

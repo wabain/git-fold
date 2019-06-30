@@ -4,6 +4,7 @@ from typing import Any, Iterator, List, Union
 
 import os
 import shlex
+import asyncio
 from contextlib import contextmanager
 from unittest import TestCase
 from tempfile import TemporaryDirectory
@@ -68,7 +69,9 @@ class SimpleIntegrationTest(TestCase):
             write_lines('test_dir/test_file', part_1_v2 + part_2_v2 + part_3_v2)
             test_cmd('git add test_dir/test_file')
 
-            old_head, new_head = suggest_basic()
+            old_head, new_head = asyncio.get_event_loop().run_until_complete(
+                suggest_basic()
+            )
 
             res = test_cmd(
                 ['git', 'range-diff', f'{old_head}...{new_head}'], capture_output=True

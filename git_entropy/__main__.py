@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import argparse
+import asyncio
 
 from . import suggest_basic
 from .git import call_git, call_git_no_capture
@@ -45,7 +46,9 @@ def run_main() -> None:
     )
     args = parser.parse_args()
 
-    old_head, new_head = suggest_basic(paths=args.path, root_rev=args.upstream)
+    old_head, new_head = asyncio.get_event_loop().run_until_complete(
+        suggest_basic(paths=args.path, root_rev=args.upstream)
+    )
 
     if new_head == old_head:
         return

@@ -29,23 +29,23 @@ import sys
 
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
-from .git import OID, Hunk, call_git
+from .git import OID, Hunk, async_call_git
 from .amend import AmendmentPlan, AbstractApplyStrategy
 from .apply_rewrite import GitSubprocessApplyStrategy
 
 
-def suggest_basic(
+async def suggest_basic(
     paths: Optional[List[str]] = None, root_rev: Optional[str] = None
 ) -> Tuple[OID, OID]:
-    head = resolve_revision('HEAD')
-    root_oid = None if root_rev is None else resolve_revision(root_rev)
+    head = await resolve_revision('HEAD')
+    root_oid = None if root_rev is None else await resolve_revision(root_rev)
 
-    _, diff, _ = call_git(*build_initial_diff_cmd(paths))
+    _, diff, _ = await async_call_git(*build_initial_diff_cmd(paths))
 
     plan = AmendmentPlan(head=head, root=root_oid)
 
     for hunk in parse_diff_hunks(diff):
-        add_hunk_to_plan(hunk, plan)
+        await add_hunk_to_plan(hunk, plan)
 
     if not plan.has_amendments():
         return head, head
@@ -53,11 +53,11 @@ def suggest_basic(
     # TODO: Add interactive mode
 
     apply_strategy = GitSubprocessApplyStrategy()
-    final = plan.write_commits(apply_strategy=apply_strategy)
+    final = await plan.write_commits(apply_strategy=apply_strategy)
     return head, final
 
 
-def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
+async def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
     for old_range, new_range in hunk.get_edits(old_rev=plan.head, new_rev=OID(0)):
         # Can't handle insert-only edits for now; even using a heuristic
         # like the source of the context lines, there's no guarantee that
@@ -67,7 +67,7 @@ def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
         if old_range is None or old_range.extent == 0:
             continue
 
-        blame_outputs = plan.blame_range(old_range)
+        blame_outputs = await plan.blame_range(old_range)
 
         if not blame_outputs:
             continue
@@ -90,7 +90,7 @@ def add_hunk_to_plan(hunk: Hunk, plan: AmendmentPlan) -> None:
         else:
             new_content = hunk.new_range_content(new_range.start, new_range.extent)
 
-        plan.add_amended_range(target_range, new_content)
+        await plan.add_amended_range(target_range, new_content)
 
 
 def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
@@ -108,9 +108,9 @@ def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
     return cmd
 
 
-def resolve_revision(head: Union[bytes, str]) -> OID:
+async def resolve_revision(head: Union[bytes, str]) -> OID:
     try:
-        _, out, _ = call_git('rev-parse', '--verify', head)
+        _, out, _ = await async_call_git('rev-parse', '--verify', head)
     except Fatal as exc:
         raise Fatal(
             f'invalid revision {head!r}',
