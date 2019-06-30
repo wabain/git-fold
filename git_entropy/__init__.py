@@ -31,13 +31,11 @@ from .diff_parser import parse_diff_hunks
 from .errors import Fatal
 from .git import OID, Hunk, call_git
 from .amend import AmendmentPlan, AbstractApplyStrategy
-from .apply_rewrite import DummyApplyStrategy, GitExecutableApplyStrategy
+from .apply_rewrite import GitSubprocessApplyStrategy
 
 
 def suggest_basic(
-    paths: Optional[List[str]] = None,
-    root_rev: Optional[str] = None,
-    is_dry_run: bool = False,
+    paths: Optional[List[str]] = None, root_rev: Optional[str] = None
 ) -> Tuple[OID, OID]:
     head = resolve_revision('HEAD')
     root_oid = None if root_rev is None else resolve_revision(root_rev)
@@ -54,11 +52,7 @@ def suggest_basic(
 
     # TODO: Add interactive mode
 
-    if is_dry_run:
-        apply_strategy: AbstractApplyStrategy = DummyApplyStrategy()
-    else:
-        apply_strategy = GitExecutableApplyStrategy()
-
+    apply_strategy = GitSubprocessApplyStrategy()
     final = plan.write_commits(apply_strategy=apply_strategy)
     return head, final
 

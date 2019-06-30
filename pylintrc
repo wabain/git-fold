@@ -4,7 +4,7 @@ max-attributes = 12
 [MESSAGES CONTROL]
 
 good-names =
-    fn,i,j,k,v,r,x,y
+    D,T,X,Y,Z,fn,i,j,k,v,r,x,y
 
 disable =
     fixme,
