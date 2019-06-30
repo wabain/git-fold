@@ -11,6 +11,7 @@ from typing import (
     cast,
     Dict,
     Generic,
+    Iterable,
     Iterator,
     List,
     NamedTuple,
@@ -212,40 +213,20 @@ class AmendedBranchBuilder:
         }
 
         parent_only = [
-            (path, parents)
-            for path, parents in parent_amendments.items()
+            (path, parent_blobs)
+            for path, parent_blobs in parent_amendments.items()
             if path not in need_full_reconcile
         ]
 
-        if not parent_only:
-            parent_only_oid_info: Dict[bytes, OID] = {}
-        else:
-            parent_path_ls = await ls_tree(
-                commit_oid, '--', *(path for path, _ in parent_only)
+        if parent_only:
+            await self._reuse_parent_blob_rewrites(
+                commit_oid, parent_only, coalesced, need_full_reconcile
             )
-            parent_only_oid_info = {entry.path: entry.oid for entry in parent_path_ls}
-
-        for path, parents in parent_only:
-            own_blob_oid = parent_only_oid_info.get(path)
-
-            if not own_blob_oid:
-                need_full_reconcile.add(path)
-                continue
-
-            ff_parent = self._find_fast_forward_parent(
-                path, commit_oid, parents, own_blob_oid
-            )
-
-            if ff_parent:
-                coalesced[path] = ff_parent
-            else:
-                need_full_reconcile.add(path)
 
         if need_full_reconcile:
             await self._handle_parent_changes_with_diff(
                 coalesced,
                 commit_oid,
-                self.commit_graph.get_parents(commit_oid),
                 new_amendments,
                 parent_amendments,
                 need_full_reconcile,
@@ -253,24 +234,52 @@ class AmendedBranchBuilder:
 
         return list(coalesced.values())
 
-    @staticmethod
-    def _find_fast_forward_parent(
-        path: bytes,
+    async def _reuse_parent_blob_rewrites(
+        self,
         commit_oid: OID,
-        parents: Dict[OID, AmendedBlob[RewriteHandle]],
-        own_blob_oid: OID,
+        parent_only_changes: List[Tuple[bytes, Dict[OID, AmendedBlob[RewriteHandle]]]],
+        coalesced: Dict[bytes, AmendedBlobInRewrite],
+        need_full_reconcile: Set[bytes],
+    ) -> None:
+        """
+        For blobs that need to be rewritten and have no new amendments
+        introduced in this commit, see if a rewrite applied to a parent can be
+        reused. If the blob at the path in this commit has a new OID, add the
+        path to the set of paths needing a full reconciliation.
+        """
+        parent_path_ls = await ls_tree(
+            commit_oid, '--', *(path for path, _ in parent_only_changes)
+        )
+        child_blob_oids = {entry.path: entry.oid for entry in parent_path_ls}
+
+        for path, parent_blobs in parent_only_changes:
+            child_blob_oid = child_blob_oids.get(path)
+
+            reusable_parent = (
+                self._find_reusable_parent(child_blob_oid, parent_blobs.values())
+                if child_blob_oid is not None
+                else None
+            )
+
+            if reusable_parent is not None:
+                coalesced[path] = reusable_parent.with_meta(commit_oid, path)
+            else:
+                need_full_reconcile.add(path)
+
+    @staticmethod
+    def _find_reusable_parent(
+        child_blob_oid: OID, parent_blobs: Iterable[AmendedBlob[RewriteHandle]]
     ) -> Optional[AmendedBlob[RewriteHandle]]:
-        for parent_blob in parents.values():
-            if parent_blob.oid != own_blob_oid:
-                continue
-            return parent_blob.with_meta(commit_oid, path, own_blob_oid)
+        for parent_blob in parent_blobs:
+            if parent_blob.oid == child_blob_oid:
+                return parent_blob
+
         return None
 
     async def _handle_parent_changes_with_diff(
         self,
         coalesced: Dict[bytes, AmendedBlobInRewrite],
         commit_oid: OID,
-        old_parent_oids: List[OID],
         new_amendments: Dict[bytes, AmendedBlob[None]],
         parent_amendments: Dict[bytes, Dict[OID, AmendedBlob[RewriteHandle]]],
         needed_paths: Set[bytes],
@@ -290,7 +299,7 @@ class AmendedBranchBuilder:
         }
         handled: Set[bytes] = set()
 
-        for old_parent_oid in old_parent_oids:
+        for old_parent_oid in self.commit_graph.get_parents(commit_oid):
             handled |= await self._account_for_diff_against_parent(
                 partially_coalesced,
                 old_parent_oid,
@@ -398,8 +407,8 @@ class AmendedBlob(Generic[D]):
             copy.replace_lines(record.start, record.extent, record.replacement)
         return copy
 
-    def with_meta(self, commit: OID, file: bytes, oid: OID) -> AmendedBlob[D]:
-        adjusted = AmendedBlob(commit, file, oid, rewrite_data=self.rewrite_data)
+    def with_meta(self, commit: OID, file: bytes) -> AmendedBlob[D]:
+        adjusted = AmendedBlob(commit, file, self.oid, rewrite_data=self.rewrite_data)
         adjusted.amendments.extend(self.amendments)
         return adjusted
 
