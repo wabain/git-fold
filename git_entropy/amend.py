@@ -28,7 +28,13 @@ from itertools import chain, count
 
 from . import git
 from .blame import run_blame
-from .git import OID, async_ls_tree, async_call_git_background, call_git, IndexedRange
+from .git import (
+    OID,
+    async_ls_tree,
+    async_call_git,
+    async_call_git_background,
+    IndexedRange,
+)
 from .log import CommitGraph
 from .errors import Fatal
 from .diff_parser import parse_diff_hunks, parse_diff_tree_summary
@@ -207,12 +213,13 @@ class AmendedBranchBuilder:
             if path not in need_full_reconcile
         ]
 
-        parent_only_oid_info = {
-            entry.path: entry.oid
-            for entry in await async_ls_tree(
+        if not parent_only:
+            parent_only_oid_info: Dict[bytes, OID] = {}
+        else:
+            parent_path_ls = await async_ls_tree(
                 commit_oid, '--', *(path for path, _ in parent_only)
             )
-        }
+            parent_only_oid_info = {entry.path: entry.oid for entry in parent_path_ls}
 
         for path, parents in parent_only:
             own_blob_oid = parent_only_oid_info.get(path)
@@ -231,7 +238,7 @@ class AmendedBranchBuilder:
                 need_full_reconcile.add(path)
 
         if need_full_reconcile:
-            self._handle_parent_changes_with_diff(
+            await self._handle_parent_changes_with_diff(
                 coalesced,
                 commit_oid,
                 self.commit_graph.get_parents(commit_oid),
@@ -255,7 +262,7 @@ class AmendedBranchBuilder:
             return parent_blob.with_meta(commit_oid, path, own_blob_oid)
         return None
 
-    def _handle_parent_changes_with_diff(
+    async def _handle_parent_changes_with_diff(
         self,
         coalesced: Dict[bytes, AmendedBlobInRewrite],
         commit_oid: OID,
@@ -280,7 +287,7 @@ class AmendedBranchBuilder:
         handled: Set[bytes] = set()
 
         for old_parent_oid in old_parent_oids:
-            handled |= self._account_for_diff_against_parent(
+            handled |= await self._account_for_diff_against_parent(
                 partially_coalesced,
                 old_parent_oid,
                 commit_oid,
@@ -293,14 +300,14 @@ class AmendedBranchBuilder:
         coalesced.update(partially_coalesced)
 
     @staticmethod
-    def _account_for_diff_against_parent(
+    async def _account_for_diff_against_parent(
         partially_coalesced: Dict[bytes, AmendedBlobInRewrite],
         old_parent_oid: OID,
         commit_oid: OID,
         parent_amendments: Dict[bytes, Dict[OID, AmendedBlob[RewriteHandle]]],
         needed_paths: Set[bytes],
     ) -> Set[bytes]:
-        _, diff_tree, _ = call_git(
+        _, diff_tree, _ = await async_call_git(
             'diff-tree', '-r', '--find-renames', old_parent_oid, commit_oid
         )
         diffed = {
@@ -320,7 +327,7 @@ class AmendedBranchBuilder:
                     f'looking at {old_parent_oid}, diffing {entry.old_path}'
                 )
 
-            _, diff_output, _ = call_git(
+            _, diff_output, _ = await async_call_git(
                 'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
             )
 
