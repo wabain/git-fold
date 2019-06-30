@@ -41,7 +41,7 @@ class SimpleIntegrationTest(TestCase):
 
         with TemporaryDirectory(prefix='git-entropy-test') as cwd, change_dir(
             cwd
-        ), update_env(**env_overrides):
+        ), update_env(**env_overrides), delete_env(['GIT_DIR', 'GIT_WORK_TREE']):
 
             # Initial
             test_cmd('git init')
@@ -130,6 +130,16 @@ def update_env(**kwargs: str) -> Iterator[None]:
         for k in changed_keys - old_keys:
             del os.environ[k]
         os.environ.update(old_env)
+
+
+@contextmanager
+def delete_env(keys: List[str]) -> Iterator[None]:
+    old = [os.environ.pop(k) for k in keys]
+    try:
+        yield
+    finally:
+        for key, value in zip(keys, old):
+            os.environ[key] = value
 
 
 def test_cmd(cmd: Union[str, List[str]], **kwargs: Any) -> CompletedProcess:
