@@ -28,13 +28,7 @@ from itertools import chain, count
 
 from . import git
 from .blame import run_blame
-from .git import (
-    OID,
-    async_ls_tree,
-    async_call_git,
-    async_call_git_background,
-    IndexedRange,
-)
+from .git import OID, ls_tree, call_git, call_git_background, IndexedRange
 from .log import CommitGraph
 from .errors import Fatal
 from .diff_parser import parse_diff_hunks, parse_diff_tree_summary
@@ -226,7 +220,7 @@ class AmendedBranchBuilder:
         if not parent_only:
             parent_only_oid_info: Dict[bytes, OID] = {}
         else:
-            parent_path_ls = await async_ls_tree(
+            parent_path_ls = await ls_tree(
                 commit_oid, '--', *(path for path, _ in parent_only)
             )
             parent_only_oid_info = {entry.path: entry.oid for entry in parent_path_ls}
@@ -317,7 +311,7 @@ class AmendedBranchBuilder:
         parent_amendments: Dict[bytes, Dict[OID, AmendedBlob[RewriteHandle]]],
         needed_paths: Set[bytes],
     ) -> Set[bytes]:
-        _, diff_tree, _ = await async_call_git(
+        _, diff_tree, _ = await call_git(
             'diff-tree', '-r', '--find-renames', old_parent_oid, commit_oid
         )
         diffed = {
@@ -337,7 +331,7 @@ class AmendedBranchBuilder:
                     f'looking at {old_parent_oid}, diffing {entry.old_path}'
                 )
 
-            _, diff_output, _ = await async_call_git(
+            _, diff_output, _ = await call_git(
                 'diff', '--patch-with-raw', entry.old_oid, entry.new_oid
             )
 
@@ -472,7 +466,7 @@ class AmendedBlob(Generic[D]):
         amend = next(amend_iter, None)
 
         file_rev = bytes(self.commit) + b':' + self.file
-        async with async_call_git_background('cat-file', '-p', file_rev) as proc:
+        async with call_git_background('cat-file', '-p', file_rev) as proc:
 
             stdout = cast(asyncio.StreamReader, proc.stdout)
 

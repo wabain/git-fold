@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Set
 
-from .git import OID, async_call_git
+from .git import OID, call_git
 
 
 class CommitGraph:
@@ -36,14 +36,14 @@ class CommitGraph:
 
     async def add_commits(self, commits: List[OID]) -> None:
         """Add the specified commits to the graph"""
-        _, output, _ = await async_call_git(
+        _, output, _ = await call_git(
             'rev-list', '--parents', '--no-walk', *(str(c) for c in commits), '--'
         )
         self._add_from_rev_list_parents(output)
 
     async def add_path(self, head: OID, root: OID) -> None:
         """Add all commits on the ancestry path from head to root to the graph"""
-        _, output, _ = await async_call_git(
+        _, output, _ = await call_git(
             'rev-list', '--parents', '--ancestry-path', str(head), f'^{root}', '--'
         )
         self._add_from_rev_list_parents(output)

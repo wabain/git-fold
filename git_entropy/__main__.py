@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import List
+
 import sys
 import argparse
 import asyncio
@@ -46,23 +48,28 @@ def run_main() -> None:
     )
     args = parser.parse_args()
 
-    old_head, new_head = asyncio.get_event_loop().run_until_complete(
-        suggest_basic(paths=args.path, root_rev=args.upstream)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(
+        perform_rewrite(paths=args.path, root_rev=args.upstream, update=args.update)
     )
+
+
+async def perform_rewrite(paths: List[str], root_rev: str, update: bool) -> None:
+    old_head, new_head = await suggest_basic(paths=paths, root_rev=root_rev)
 
     if new_head == old_head:
         return
 
     # TODO: Emulate the relevant pager, colorization, display option logic here
-    call_git_no_capture('range-diff', f'{old_head}...{new_head}')
-    call_git_no_capture('diff', '--staged', new_head)
+    await call_git_no_capture('range-diff', f'{old_head}...{new_head}')
+    await call_git_no_capture('diff', '--staged', new_head)
 
-    if not args.update:
+    if not update:
         return
 
     if input('proceed? [y/N] ').lower().strip() != 'y':
         return
 
-    call_git(
+    await call_git(
         'update-ref', '-m', 'entropy: absorb staged changes', 'HEAD', new_head, old_head
     )

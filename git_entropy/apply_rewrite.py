@@ -14,10 +14,10 @@ from .git import (
     OID,
     CommitListingEntry,
     TreeListingEntry,
-    async_call_git,
-    async_call_git_background,
+    call_git,
+    call_git_background,
     cat_commit,
-    async_ls_tree,
+    ls_tree,
     mk_tree,
 )
 
@@ -168,7 +168,7 @@ class GitBackendWorker:
             parent_args.append('-p')
             parent_args.append(str(new_parent))
 
-        _, out, _ = await async_call_git(
+        _, out, _ = await call_git(
             'commit-tree',
             tree,
             *parent_args,
@@ -214,9 +214,7 @@ class GitBackendWorker:
 
         for subdir in dirs:
             entries = []
-            for entry in await async_ls_tree(
-                commit_info.commit_oid, '--', subdir + b'/'
-            ):
+            for entry in await ls_tree(commit_info.commit_oid, '--', subdir + b'/'):
                 updated_entry_oid = new_blobs.get(entry.path, entry.oid)
                 entries.append(
                     TreeListingEntry(
@@ -255,7 +253,7 @@ class GitBackendWorker:
             amended_blob.file.decode(errors='replace'),
         )
 
-        async with async_call_git_background(
+        async with call_git_background(
             'hash-object', '-tblob', '--stdin', '-w'
         ) as proc:
             stdin = cast(asyncio.StreamWriter, proc.stdin)

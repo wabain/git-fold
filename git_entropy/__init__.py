@@ -29,7 +29,7 @@ import sys
 
 from .diff_parser import parse_diff_hunks
 from .errors import Fatal
-from .git import OID, Hunk, async_call_git
+from .git import OID, Hunk, call_git
 from .amend import AmendmentPlan, AbstractApplyStrategy
 from .apply_rewrite import GitSubprocessApplyStrategy
 
@@ -40,7 +40,7 @@ async def suggest_basic(
     head = await resolve_revision('HEAD')
     root_oid = None if root_rev is None else await resolve_revision(root_rev)
 
-    _, diff, _ = await async_call_git(*build_initial_diff_cmd(paths))
+    _, diff, _ = await call_git(*build_initial_diff_cmd(paths))
 
     plan = AmendmentPlan(head=head, root=root_oid)
 
@@ -110,7 +110,7 @@ def build_initial_diff_cmd(paths: Optional[List[str]]) -> List[str]:
 
 async def resolve_revision(head: Union[bytes, str]) -> OID:
     try:
-        _, out, _ = await async_call_git('rev-parse', '--verify', head)
+        _, out, _ = await call_git('rev-parse', '--verify', head)
     except Fatal as exc:
         raise Fatal(
             f'invalid revision {head!r}',

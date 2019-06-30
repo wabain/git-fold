@@ -18,9 +18,9 @@ from typing import (
 
 import os
 import asyncio
-from subprocess import Popen, PIPE, run
+from asyncio.subprocess import PIPE
 from enum import Enum
-from contextlib import asynccontextmanager, contextmanager
+from contextlib import asynccontextmanager
 
 from .errors import Fatal
 
@@ -117,7 +117,7 @@ class IndexedRange:
 
     async def blob_oid(self) -> OID:
         if self._blob_oid is None:
-            for entry in await async_ls_tree(self.rev, '--', self.file):
+            for entry in await ls_tree(self.rev, '--', self.file):
                 if entry.obj_type != 'blob':
                     # TODO: sanity check; maybe some non-blobs are okay
                     raise ValueError(
@@ -275,8 +275,8 @@ class Hunk:
         return f'<Hunk {f_repr} @@ -{self.old_start} +{self.new_start}>'
 
 
-async def async_ls_tree(*args: Union[bytes, str, OID]) -> Iterator[TreeListingEntry]:
-    _, out, _ = await async_call_git('ls-tree', *args)
+async def ls_tree(*args: Union[bytes, str, OID]) -> Iterator[TreeListingEntry]:
+    _, out, _ = await call_git('ls-tree', *args)
     return _parse_ls_tree(out)
 
 
@@ -294,7 +294,7 @@ async def mk_tree(entries: Iterable[TreeListingEntry]) -> OID:
         f'{e.mode} {e.obj_type} {e.oid}'.encode() + b'\t' + e.path for e in entries
     )
 
-    _, out, _ = await async_call_git('mktree', '--missing', input=git_input)
+    _, out, _ = await call_git('mktree', '--missing', input=git_input)
 
     return OID(out.strip())
 
@@ -312,7 +312,7 @@ async def cat_commit(rev: OID) -> CommitListingEntry:
         '%cd',  # committer date
         '%B',  # body
     ]
-    _, out, _ = await async_call_git(
+    _, out, _ = await call_git(
         'rev-list', '--max-count=1', '--format=' + '%n'.join(fields), '--date=raw', rev
     )
     lines = out.split(b'\n', maxsplit=len(fields))
@@ -348,17 +348,57 @@ async def cat_commit(rev: OID) -> CommitListingEntry:
 Environ = Dict[str, Union[bytes, str]]
 
 
-async def async_call_git(
+async def call_git(
     *args: Union[bytes, str, OID],
     must_succeed: bool = True,
     input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
     env: Optional[Environ] = None,
 ) -> Tuple[int, bytes, bytes]:
+    code, stdout, stderr = await _call_git(
+        *args,
+        must_succeed=must_succeed,
+        input=input,
+        env=env,
+        stdin_fd=PIPE,
+        stdout_fd=PIPE,
+        stderr_fd=PIPE,
+    )
+
+    return code, cast(bytes, stdout), cast(bytes, stderr)
+
+
+async def call_git_no_capture(
+    *args: Union[bytes, str, OID],
+    must_succeed: bool = True,
+    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
+    env: Optional[Environ] = None,
+) -> int:
+    code, _, _ = await _call_git(
+        *args,
+        must_succeed=must_succeed,
+        input=input,
+        env=env,
+        stdin_fd=None,
+        stdout_fd=None,
+        stderr_fd=None,
+    )
+    return code
+
+
+async def _call_git(
+    *args: Union[bytes, str, OID],
+    must_succeed: bool = True,
+    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
+    env: Optional[Environ] = None,
+    stdin_fd: Optional[int],
+    stdout_fd: Optional[int],
+    stderr_fd: Optional[int],
+) -> Tuple[int, Optional[bytes], Optional[bytes]]:
 
     cmd = _build_git_cmd(args)
 
     proc = await asyncio.create_subprocess_exec(
-        *cmd, env=_setup_env(env), stdin=PIPE, stdout=PIPE, stderr=PIPE
+        *cmd, env=_setup_env(env), stdin=stdin_fd, stdout=stdout_fd, stderr=stderr_fd
     )
 
     stdout, stderr = await proc.communicate(
@@ -372,7 +412,7 @@ async def async_call_git(
 
 
 @asynccontextmanager
-async def async_call_git_background(
+async def call_git_background(
     *args: Union[bytes, str, OID],
     must_succeed: bool = True,
     env: Optional[Environ] = None,
@@ -394,69 +434,6 @@ async def async_call_git_background(
     if must_succeed and proc.returncode != 0:
         stderr = await cast(asyncio.StreamReader, proc.stderr).read()
         _handle_git_error(cmd, proc.returncode, lambda: stderr)
-
-
-def call_git(
-    *args: Union[bytes, str, OID],
-    must_succeed: bool = True,
-    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
-    env: Optional[Environ] = None,
-) -> Tuple[int, bytes, bytes]:
-    code, out, err = _call_git_sync(
-        *args, must_succeed=must_succeed, input=input, env=env, capture_output=True
-    )
-    return code, cast(bytes, out), cast(bytes, err)
-
-
-def call_git_no_capture(
-    *args: Union[bytes, str, OID],
-    must_succeed: bool = True,
-    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
-    env: Optional[Environ] = None,
-) -> int:
-    code, _, _ = _call_git_sync(
-        *args, must_succeed=must_succeed, input=input, env=env, capture_output=False
-    )
-    return code
-
-
-def _call_git_sync(
-    *args: Union[bytes, str, OID],
-    must_succeed: bool = True,
-    input: Optional[Union[bytes, str]] = None,  # pylint: disable=redefined-builtin
-    env: Optional[Environ] = None,
-    capture_output: bool = True,
-) -> Tuple[int, Optional[bytes], Optional[bytes]]:
-
-    cmd = _build_git_cmd(args)
-
-    outcome = run(cmd, input=input, env=_setup_env(env), capture_output=capture_output)
-
-    if must_succeed:
-        _handle_git_error(cmd, outcome.returncode, lambda: outcome.stderr or b'')
-
-    return outcome.returncode, outcome.stdout, outcome.stderr
-
-
-@contextmanager
-def call_git_background(
-    *args: Union[bytes, str, OID],
-    must_succeed: bool = True,
-    env: Optional[Environ] = None,
-) -> Iterator[Popen]:
-
-    cmd = _build_git_cmd(args)
-
-    with Popen(cmd, stdin=PIPE, stdout=PIPE, stderr=PIPE, env=_setup_env(env)) as proc:
-        try:
-            yield proc
-            proc.wait()
-        except:
-            proc.kill()
-            raise
-
-        if must_succeed:
-            _handle_git_error(cmd, proc.returncode, proc.stderr.read)
 
 
 def _build_git_cmd(
