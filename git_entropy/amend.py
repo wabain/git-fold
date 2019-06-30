@@ -454,7 +454,7 @@ class AmendedBlob(Generic[D]):
         amend_iter = iter(self.amendments)
         amend = next(amend_iter, None)
 
-        file_rev = f'{self.commit}:'.encode() + self.file
+        file_rev = bytes(self.commit) + b':' + self.file
         async with async_call_git_background('cat-file', '-p', file_rev) as proc:
 
             stdout = cast(asyncio.StreamReader, proc.stdout)
