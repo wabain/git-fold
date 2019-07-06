@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import typing
-from typing import cast, Dict, List, NamedTuple, Tuple, Union
+from typing import cast, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import os
 import asyncio
@@ -51,6 +51,9 @@ class GitSubprocessApplyStrategy(AbstractApplyStrategy):
     async def resolve_handle(self, handle: RewriteHandle) -> OID:
         return await self.backend.resolve_handle(handle)
 
+    def cancel(self) -> None:
+        self.backend.cancel()
+
     async def join(self) -> None:
         return await self.backend.join()
 
@@ -63,7 +66,7 @@ class GitBackend:
 
         backend_worker = GitBackendWorker(self.loop, self.queue)
         self._backend_worker = backend_worker
-        self._backend_done = backend_worker.launch()
+        backend_worker.launch()
 
     async def request_commit_rewrite(
         self,
@@ -95,9 +98,12 @@ class GitBackend:
     async def resolve_handle(self, commit_handle: RewriteHandle) -> OID:
         return await self._backend_worker.resolve_commit_handle(commit_handle)
 
+    def cancel(self) -> None:
+        self._backend_worker.cancel()
+
     async def join(self) -> None:
         await self.queue.join()
-        self._backend_done.cancel()
+        self.cancel()
 
 
 class GitBackendWorker:
@@ -110,8 +116,20 @@ class GitBackendWorker:
         self._commit_rewrites: Dict[RewriteHandle, asyncio.Future[OID]] = {}
         self._blob_rewrites: Dict[RewriteHandle, asyncio.Future[AmendedBlob[OID]]] = {}
 
+        self._done: Optional[asyncio.Future[None]] = None
+
     def launch(self) -> asyncio.Future[None]:
-        return self.loop.create_task(self._run())
+        if self._done is not None:
+            raise RuntimeError('GitBackendWorker launched more than once')
+
+        self._done = self.loop.create_task(self._run())
+        return self._done
+
+    def cancel(self) -> None:
+        if not self._done:
+            return
+
+        self._done.cancel()
 
     async def resolve_commit_handle(self, commit_handle: RewriteHandle) -> OID:
         to_resolve = self._get_commit_rewrite_future(commit_handle)

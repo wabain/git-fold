@@ -53,7 +53,13 @@ async def suggest_basic(
     # TODO: Add interactive mode
 
     apply_strategy = GitSubprocessApplyStrategy()
-    final = await plan.write_commits(apply_strategy=apply_strategy)
+
+    try:
+        final = await plan.write_commits(apply_strategy=apply_strategy)
+    except:
+        apply_strategy.cancel()
+        raise
+
     return head, final
 
 
