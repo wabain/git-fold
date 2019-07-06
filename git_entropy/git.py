@@ -134,7 +134,8 @@ class IndexedRange:
         return f'{self.start},+{self.extent}'
 
     def __repr__(self) -> str:
-        return f'<IndexedRange {self.rev} {self.file!r} {self.formatted_range}>'
+        encoded_file = self.file.decode(errors='replace')
+        return f'<IndexedRange {self.rev}:{encoded_file} {self.formatted_range}>'
 
 
 class Hunk:
