@@ -4,7 +4,19 @@
 from __future__ import annotations
 
 import typing
-from typing import cast, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    cast,
+    Any,
+    Awaitable,
+    Dict,
+    Iterator,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 import os
 import asyncio
@@ -20,16 +32,6 @@ from .git import (
     ls_tree,
     mk_tree,
 )
-
-
-class RewriteRequest(NamedTuple):
-    commit_oid: OID
-    commit_handle: RewriteHandle
-    parents: List[Union[OID, RewriteHandle]]
-    amended_blobs: List[AmendedBlob[RewriteHandle]]
-
-
-BackendRequest = Union[RewriteRequest]  # XXX needed?
 
 
 class GitSubprocessApplyStrategy(AbstractApplyStrategy):
@@ -61,10 +63,9 @@ class GitSubprocessApplyStrategy(AbstractApplyStrategy):
 class GitBackend:
     def __init__(self) -> None:
         self.loop = asyncio.get_event_loop()
-        self.queue: asyncio.Queue[BackendRequest] = asyncio.Queue(maxsize=100)
         self._next_handle = 1
 
-        backend_worker = GitBackendWorker(self.loop, self.queue)
+        backend_worker = GitBackendWorker(self.loop)
         self._backend_worker = backend_worker
         backend_worker.launch()
 
@@ -85,9 +86,10 @@ class GitBackend:
             for blob in blobs
         ]
 
-        await self.queue.put(
-            RewriteRequest(commit_oid, commit_handle, parents, blobs_with_handles)
+        await self._backend_worker.schedule_commit_rewrite(
+            commit_handle, commit_oid, parents, blobs_with_handles
         )
+
         return commit_handle, blobs_with_handles
 
     def _bump_handle(self) -> int:
@@ -102,81 +104,199 @@ class GitBackend:
         self._backend_worker.cancel()
 
     async def join(self) -> None:
-        await self.queue.join()
+        await self._backend_worker.join()
         self.cancel()
 
 
-class GitBackendWorker:
-    def __init__(
-        self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue[BackendRequest]
-    ) -> None:
-        self.loop = loop
-        self.queue = queue
+class PendingCommitRewriteData(NamedTuple):
+    commit_oid: OID
+    parents: List[Union[OID, RewriteHandle]]
+    blobs: List[AmendedBlob[RewriteHandle]]
 
-        self._commit_rewrites: Dict[RewriteHandle, asyncio.Future[OID]] = {}
+
+class PendingCommitRewrite(NamedTuple):
+    input_future: asyncio.Future[PendingCommitRewriteData]
+    task: asyncio.Task[OID]
+
+
+class CommitRewriteRequest(NamedTuple):
+    commit_handle: RewriteHandle
+    data: PendingCommitRewriteData
+
+
+T = TypeVar('T')
+
+
+class GitBackendWorker:
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self.loop = loop
+        self._queue: asyncio.Queue[CommitRewriteRequest] = asyncio.Queue(maxsize=100)
+
+        self._commit_rewrites: Dict[RewriteHandle, PendingCommitRewrite] = {}
         self._blob_rewrites: Dict[RewriteHandle, asyncio.Future[AmendedBlob[OID]]] = {}
 
-        self._done: Optional[asyncio.Future[None]] = None
+        self._main: Optional[asyncio.Future[None]] = None
+        self._completion: asyncio.Future[None] = self.loop.create_future()
 
     def launch(self) -> asyncio.Future[None]:
-        if self._done is not None:
+        if self._main is not None:
             raise RuntimeError('GitBackendWorker launched more than once')
 
-        self._done = self.loop.create_task(self._run())
-        return self._done
+        self._main = self.loop.create_task(self._die_on_error(self._run()))
+        return self._main
 
-    def cancel(self) -> None:
-        if not self._done:
-            return
-
-        self._done.cancel()
-
-    async def resolve_commit_handle(self, commit_handle: RewriteHandle) -> OID:
-        to_resolve = self._get_commit_rewrite_future(commit_handle)
-        return await to_resolve
-
-    async def _run(self) -> None:
-        while True:
-            request = await self.queue.get()
-
-            to_resolve = self._get_commit_rewrite_future(request.commit_handle)
-
-            print('handling request')
-            self.loop.create_task(self._process_rewrite_request(request, to_resolve))
-
-            self.queue.task_done()
-
-    def _get_commit_rewrite_future(self, handle: RewriteHandle) -> asyncio.Future[OID]:
-        try:
-            to_resolve = self._commit_rewrites[handle]
-        except KeyError:
-            to_resolve = asyncio.Future()
-            self._commit_rewrites[handle] = to_resolve
-
-        return to_resolve
-
-    async def _process_rewrite_request(
-        self, request: RewriteRequest, to_resolve: asyncio.Future[OID]
+    async def schedule_commit_rewrite(
+        self,
+        commit_handle: RewriteHandle,
+        commit_oid: OID,
+        parents: List[Union[OID, RewriteHandle]],
+        blobs: List[AmendedBlob[RewriteHandle]],
     ) -> None:
-        amended_with_oids = list(
-            await asyncio.gather(
-                *(self._resolve_blob(blob) for blob in request.amended_blobs)
+        await self._propagate_fatal_exc(
+            self._queue.put(
+                CommitRewriteRequest(
+                    commit_handle, PendingCommitRewriteData(commit_oid, parents, blobs)
+                )
             )
         )
 
-        commit_info = await cat_commit(request.commit_oid)
+    async def join(self) -> None:
+        await self._propagate_fatal_exc(self._queue.join())
+
+    def cancel(self) -> None:
+        if not self._completion.done():
+            self._completion.set_result(None)
+
+        if self._main is not None and not self._main.done():
+            self._main.cancel()
+
+        for task in self._blob_rewrites.values():
+            if not task.done():
+                task.cancel()
+
+        for pending_data in self._commit_rewrites.values():
+            if not pending_data.input_future.done():
+                pending_data.input_future.cancel()
+
+            if not pending_data.task.done():
+                pending_data.task.cancel()
+
+    async def _propagate_fatal_exc(self, happy_path_awaitable: Awaitable[T]) -> T:
+        happy_path: asyncio.Future[T]
+
+        if asyncio.isfuture(happy_path_awaitable):
+            happy_path = cast('asyncio.Future[T]', happy_path_awaitable)
+        else:
+            happy_path = self.loop.create_task(happy_path_awaitable)
+
+        if not self._completion.done():
+            futures: List[Awaitable[Any]] = [happy_path, self._completion]
+
+            await asyncio.wait(
+                futures, timeout=None, return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if not self._completion.done():
+                return happy_path.result()
+
+        # At this point we know completion is done
+
+        if not happy_path.done():
+            happy_path.cancel()
+
+        # Raise exception
+        self._completion.result()
+
+        # Fallback: there was already an orderly exit
+        raise RuntimeError('future is pending after join')
+
+    async def resolve_commit_handle(self, commit_handle: RewriteHandle) -> OID:
+        try:
+            rewrite_task = self._commit_rewrites[commit_handle].task
+        except KeyError:
+            # Spawn the rewrite task now. When the rewrite request is received
+            # from the queue, the input future will be resolved with the
+            # concrete data and the task can start its work.
+            input_future = self.loop.create_future()
+            rewrite_task = self._spawn_commit_rewrite_task(commit_handle, input_future)
+
+        return await self._propagate_fatal_exc(rewrite_task)
+
+    async def _run(self) -> None:
+        while True:
+            request = await self._queue.get()
+            print('handling request')
+
+            try:
+                input_future = self._commit_rewrites[request.commit_handle].input_future
+            except KeyError:
+                input_future = self.loop.create_future()
+                self._spawn_commit_rewrite_task(request.commit_handle, input_future)
+
+            if not input_future.cancelled():
+                input_future.set_result(request.data)
+
+            self._queue.task_done()
+
+    def _spawn_commit_rewrite_task(
+        self,
+        commit_handle: RewriteHandle,
+        input_future: asyncio.Future[PendingCommitRewriteData],
+    ) -> asyncio.Task[OID]:
+        task = self.loop.create_task(
+            self._die_on_error(
+                self._process_rewrite_request(commit_handle, input_future)
+            )
+        )
+
+        self._commit_rewrites[commit_handle] = PendingCommitRewrite(
+            input_future=input_future, task=task
+        )
+
+        return task
+
+    async def _die_on_error(self, coro: Awaitable[T]) -> T:
+        try:
+            return await coro
+        except BaseException as exc:
+            if not self._completion.done():
+                self._completion.set_exception(exc)
+
+            self.cancel()
+            raise asyncio.CancelledError()
+
+    async def _process_rewrite_request(
+        self,
+        _commit_handle: RewriteHandle,
+        input_future: asyncio.Future[PendingCommitRewriteData],
+    ) -> OID:
+        data = await input_future
+
+        amended_with_oids = list(
+            await asyncio.gather(*(self._resolve_blob(blob) for blob in data.blobs))
+        )
+
+        commit_info = await cat_commit(data.commit_oid)
         new_tree_oid = await self._write_tree(commit_info, amended_with_oids)
-
-        new_parents = [
-            parent if isinstance(parent, OID) else await self._commit_rewrites[parent]
-            for parent in request.parents
-        ]
-
+        new_parents = list(await asyncio.gather(*self._resolve_parents(data.parents)))
         new_oid = await self._write_commit(commit_info, new_tree_oid, new_parents)
-        to_resolve.set_result(new_oid)
 
         print('rewrote', commit_info.oneline())
         print('-> ', new_oid)
+
+        return new_oid
+
+    def _resolve_parents(
+        self, parents: List[Union[OID, RewriteHandle]]
+    ) -> Iterator[Awaitable[OID]]:
+        for parent in parents:
+            if isinstance(parent, OID):
+                fut = self.loop.create_future()
+                fut.set_result(parent)
+                yield fut
+                continue
+
+            yield self._commit_rewrites[parent].task
 
     async def _write_commit(
         self, commit_info: CommitListingEntry, tree: OID, new_parents: List[OID]

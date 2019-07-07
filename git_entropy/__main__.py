@@ -21,6 +21,7 @@ def main() -> None:
             print(exc.extended, file=sys.stderr)
         sys.exit(exc.returncode)
     except KeyboardInterrupt:
+        asyncio.get_event_loop().stop()
         sys.exit(1)
 
 
