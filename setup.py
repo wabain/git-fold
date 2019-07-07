@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import os
 from subprocess import run
-from typing import List, NamedTuple, Union
+from typing import List, NamedTuple, Optional, Union
 from distutils.errors import DistutilsError
 from distutils import log
 from setuptools import Command, setup, find_packages
+
+
+#
+# The `check` subcommand
+#
 
 
 class Check(NamedTuple):
@@ -31,7 +36,7 @@ class CheckCommand(Command):  # type: ignore
         checks: List[Union[Check, str]] = [
             # fmt: off
 
-            'test',
+            'coverage',
 
             # Specify files and directories directly because black's file ignoring
             # will look at the absolute path:
@@ -99,6 +104,45 @@ def get_mark(retcode: Union[bool, int]) -> str:
     return '✨' if retcode_success(retcode) else '❌'
 
 
+#
+# The `coverage` subcommand
+#
+
+
+class CoverageCommand(Command):  # type: ignore
+    user_options: List[str] = []
+
+    def initialize_options(self) -> None:
+        pass
+
+    def finalize_options(self) -> None:
+        pass
+
+    def run(self) -> None:
+        from coverage import Coverage
+
+        cov = Coverage()
+
+        failed_message: Optional[str] = None
+        cov.start()
+        try:
+            self.run_command('test')
+        except DistutilsError as exc:
+            failed_message = str(exc)
+        finally:
+            cov.save()
+
+        cov.report()
+        cov.html_report()
+
+        if failed_message:
+            raise DistutilsError(f'tests failed: {failed_message}')
+
+
+#
+# Package declaration
+#
+
 with open('README.md') as f:
     LONG_DESCRIPTION = f.read()
 
@@ -152,5 +196,6 @@ setup(
 
     cmdclass={
         'check': CheckCommand,
+        'coverage': CoverageCommand,
     }
 )
