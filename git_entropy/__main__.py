@@ -5,6 +5,7 @@ from typing import List
 import sys
 import argparse
 import asyncio
+from signal import SIGINT
 
 from . import suggest_basic
 from .git import call_git, call_git_no_capture
@@ -15,14 +16,17 @@ def main() -> None:
     try:
         run_main()
     except Fatal as exc:
-        print(f'fatal: {exc}', file=sys.stderr)
-        if exc.extended:
-            print(file=sys.stderr)
-            print(exc.extended, file=sys.stderr)
+        # If the child process was interrupted, exit silently
+        if exc.returncode != 128 + SIGINT:
+            print(f'fatal: {exc}', file=sys.stderr)
+            if exc.extended:
+                print(file=sys.stderr)
+                print(exc.extended, file=sys.stderr)
+
         sys.exit(exc.returncode)
     except KeyboardInterrupt:
         asyncio.get_event_loop().stop()
-        sys.exit(1)
+        sys.exit(128 + SIGINT)
 
 
 def run_main() -> None:
