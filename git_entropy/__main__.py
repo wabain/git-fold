@@ -78,3 +78,7 @@ async def perform_rewrite(paths: List[str], root_rev: str, update: bool) -> None
     await call_git(
         'update-ref', '-m', 'entropy: absorb staged changes', 'HEAD', new_head, old_head
     )
+
+
+if __name__ == '__main__':
+    main()
