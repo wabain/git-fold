@@ -137,11 +137,12 @@ def update_env(**kwargs: str) -> Iterator[None]:
 
 @contextmanager
 def delete_env(keys: List[str]) -> Iterator[None]:
-    old = [os.environ.pop(k) for k in keys]
+    present_keys = [k for k in keys if k in os.environ]
+    old = [os.environ.pop(k) for k in present_keys]
     try:
         yield
     finally:
-        for key, value in zip(keys, old):
+        for key, value in zip(present_keys, old):
             os.environ[key] = value
 
 
