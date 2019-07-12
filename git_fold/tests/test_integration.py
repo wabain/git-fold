@@ -23,11 +23,11 @@ class SimpleIntegrationTest(TestCase):
             'GIT_CONFIG_NOSYSTEM': '1',
             'HOME': '/var/empty/doesntexist',
             'XDG_CONFIG_HOME': '/var/empty/doesntexist',
-            'GIT_AUTHOR_NAME': 'git-entropy-test',
-            'GIT_AUTHOR_EMAIL': 'git-entropy-test@example.org',
+            'GIT_AUTHOR_NAME': 'git-fold-test',
+            'GIT_AUTHOR_EMAIL': 'git-fold-test@example.org',
             'GIT_AUTHOR_DATE': '2019-05-26 14:35:38+00:00',
-            'GIT_COMMITTER_NAME': 'git-entropy-revised',
-            'GIT_COMMITTER_EMAIL': 'git-entropy-revised@example.org',
+            'GIT_COMMITTER_NAME': 'git-fold-revised',
+            'GIT_COMMITTER_EMAIL': 'git-fold-revised@example.org',
             'GIT_COMMITTER_DATE': '2019-05-27 14:35:38+00:00',
         }
 
@@ -79,7 +79,7 @@ class SimpleIntegrationTest(TestCase):
 
             expected = dedent(
                 r'''
-                1:  b45bf44 ! 1:  af6289a initial
+                1:  0310914 ! 1:  802ad3f initial
                     @@ -8,5 +8,5 @@
                      +++ b/test_dir/test_file
                      @@
@@ -87,7 +87,7 @@ class SimpleIntegrationTest(TestCase):
                     -+hello world
                     ++Hello world.
                      +thsi is the end.
-                2:  7954059 ! 2:  324846c variant b
+                2:  c582ae3 ! 2:  3b887a8 variant b
                     @@ -9,5 +9,5 @@
                      -this is a file.
                      +This is a file.
@@ -95,7 +95,7 @@ class SimpleIntegrationTest(TestCase):
                     - hello world
                     + Hello world.
                       thsi is the end.
-                3:  c18be95 ! 3:  c4fee68 variant a
+                3:  cd173da ! 3:  7eb89ce variant a
                     @@ -7,7 +7,7 @@
                      +++ b/test_dir/test_file
                      @@
