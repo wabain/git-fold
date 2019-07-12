@@ -1,8 +1,8 @@
-# git entropy
+# git fold
 
 A git extension for flexible, convenient change backporting.
 
-git entropy takes staged changes, finds the commits in which the affected lines
+git fold takes staged changes, finds the commits in which the affected lines
 originate, and rewrites the branch, amending those commits to incorporate the
 changes. This allows changes to be backported without touching the work tree and
 without the possibility of merge conflicts.
@@ -11,7 +11,7 @@ without the possibility of merge conflicts.
 ## Usage
 
 ```
-git entropy (--root | <upstream>) [--no-update] [[--] <path>...]
+git fold (--root | <upstream>) [--no-update] [[--] <path>...]
 ```
 
 Backport staged changes to commits between `upstream` or the root commit and
@@ -22,13 +22,13 @@ displaying the changes and then rewrite the commits.
 
 ## Installation
 
-git entropy requires Python 3.7 or later and has been tested with git version
+git fold requires Python 3.7 or later and has been tested with git version
 2.19.0.
 
 To use a pre-release version, install it with pip, specifying the commit or
 branch. Before use, see the caveats under Roadmap below.
 
-    pip install git+https://github.com/wabain/git-entropy.git@master
+    pip install git+https://github.com/wabain/git-fold.git@master
 
 
 
@@ -56,22 +56,22 @@ onto updates from a shared branch, as in the canonical use of git rebase. In
 particular, when tweaking work in progress it is  very often desirable to
 backport a change *as far as possible* without creating merge conflicts, since
 that point usually corresponds to the point where the relevant change was
-introduced. The goal of git entropy is to make that workflow as painless as
+introduced. The goal of git fold is to make that workflow as painless as
 possible.
 
-git entropy is inspired by Mercurial's
+This project is inspired by Mercurial's
 [absorb](https://gregoryszorc.com/blog/2018/11/05/absorbing-commit-changes-in-mercurial-4.8/)
 command.
 
 
 ## Roadmap
 
-git entropy is ready for experimental use. At this stage, users should expect to
+git fold is ready for experimental use. At this stage, users should expect to
 inspect each proposed diff before confirming the changes, and should be familiar
 with using the [reflog](https://git-scm.com/docs/git-reflog) to revert unwanted
 changes that are inadvertently approved.
 
-A number of enhancements are expected before git entropy will be recommended for
+A number of enhancements are expected before git fold will be recommended for
 general use:
 
 * More support for diffs that only add lines is needed. Currently, additions

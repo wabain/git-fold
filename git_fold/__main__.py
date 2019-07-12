@@ -30,7 +30,7 @@ def main() -> None:
 
 
 def run_main() -> None:
-    parser = argparse.ArgumentParser('git entropy')
+    parser = argparse.ArgumentParser('git fold')
 
     root_opts = parser.add_mutually_exclusive_group(required=True)
     root_opts.add_argument(
@@ -76,7 +76,7 @@ async def perform_rewrite(paths: List[str], root_rev: str, update: bool) -> None
         return
 
     await call_git(
-        'update-ref', '-m', 'entropy: absorb staged changes', 'HEAD', new_head, old_head
+        'update-ref', '-m', 'fold: absorb staged changes', 'HEAD', new_head, old_head
     )
 
 

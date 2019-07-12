@@ -41,11 +41,11 @@ class CheckCommand(Command):  # type: ignore
             # Specify files and directories directly because black's file ignoring
             # will look at the absolute path:
             # https://github.com/python/black/issues/712
-            Check('black --check --diff *.py git_entropy', shell=True),
+            Check('black --check --diff *.py git_fold', shell=True),
 
             Check(['mypy', '--strict', '--ignore-missing-imports', '.']),
 
-            Check('pylint *.py git_entropy', shell=True),
+            Check('pylint *.py git_fold', shell=True),
         ]
 
         return_codes: List[Union[bool, int]] = []
@@ -148,13 +148,13 @@ with open('README.md') as f:
 
 setup(
     # fmt: off
-    name='git_entropy',
+    name='git_fold',
     version='0.0.1',
 
     description='A git extention for flexible, convenient change backporting',
     long_description=LONG_DESCRIPTION,
 
-    url='https://github.com/wabain/git-entropy.git',
+    url='https://github.com/wabain/git-fold.git',
 
     author='William Bain',
     author_email='bain.william.a@gmail.com',
@@ -190,7 +190,7 @@ setup(
 
     entry_points={
         'console_scripts': [
-            'git-entropy = git_entropy.__main__:main',
+            'git-fold = git_fold.__main__:main',
         ],
     },
 

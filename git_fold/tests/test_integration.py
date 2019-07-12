@@ -40,7 +40,7 @@ class SimpleIntegrationTest(TestCase):
         part_3_v1 = ['thsi is the end.']
         part_3_v2 = ['', 'This is the end.']
 
-        with TemporaryDirectory(prefix='git-entropy-test') as cwd, change_dir(
+        with TemporaryDirectory(prefix='git-fold-test') as cwd, change_dir(
             cwd
         ), update_env(**env_overrides), delete_env(['GIT_DIR', 'GIT_WORK_TREE']):
 

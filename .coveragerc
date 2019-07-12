@@ -1,6 +1,6 @@
 [run]
 branch = True
-source = git_entropy
+source = git_fold
 omit = **/test*.py
 
 [report]

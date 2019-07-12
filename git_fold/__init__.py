@@ -1,24 +1,4 @@
-"""An "hg absorb"-style utility for git with some novel heuristics
-
-High-level idea: given a patch and a series of prior commits, find
-an assignment of amendments to the commits that yields the same output
-tree while minimizing (maximizing?) the entropy of the amendment diffs.
-
-The idea is that e.g. renamings should be backported as early as possible
-and using some form of entropy metric to do so should tend to yield something
-close to atomic applications of the renaming.
-
-To have this work well, some additional plumbing will probably be needed:
-
-* an interactive feedback mechanism (something like git add -p, maybe)
-* tokenization, to have entropy computation work on units larger than
-  individual characters. hooking into a word-diff regex might be good
-  enough to start
-
-Implementation
-==============
-
-For the first implementation, build on top of git blame.
+"""An "hg absorb"-style utility for git
 """
 
 from __future__ import annotations

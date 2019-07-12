@@ -13,7 +13,7 @@ Install dependencies and link in the package for development use:
 ```bash
 $ pip install -e .[dev,test]
 $ python setup.py develop
-$ git entropy -h
+$ git fold -h
 ...
 ```
 
@@ -21,12 +21,11 @@ Lint and test the source code:
 
 ```bash
 $ python setup.py check
-$ python setup.py test
+$ python setup.py test  # Test only
 ```
 
 Collect code coverage:
 
 ```bash
-$ coverage run --source git_entropy setup.py test
-$ coverage html
+$ python setup.py coverage
 ```
